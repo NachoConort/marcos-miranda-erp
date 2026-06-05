@@ -1,0 +1,1 @@
+const { listasRoutes } = require('./crud.factory'); module.exports = listasRoutes

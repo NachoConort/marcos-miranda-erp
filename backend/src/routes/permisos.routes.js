@@ -1,0 +1,1 @@
+const { permisosRoutes } = require('./crud.factory'); module.exports = permisosRoutes

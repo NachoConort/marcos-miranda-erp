@@ -4,11 +4,14 @@ export default {
   theme: {
     extend: {
       colors: {
-        primary: {
-          50:  '#eff6ff',
-          500: '#3b82f6',
-          600: '#2563eb',
-          700: '#1d4ed8',
+        sidebar: {
+          bg:      '#1a1f2e',
+          hover:   'rgba(255,255,255,0.06)',
+          active:  '#2563eb',
+          text:    'rgba(255,255,255,0.55)',
+          textHi:  'rgba(255,255,255,0.85)',
+          border:  'rgba(255,255,255,0.08)',
+          section: 'rgba(255,255,255,0.3)',
         },
       },
     },

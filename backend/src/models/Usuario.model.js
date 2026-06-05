@@ -6,11 +6,7 @@ const usuarioSchema = new mongoose.Schema(
     nombre: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true, minlength: 6 },
-    rol: {
-      type: String,
-      enum: ['admin', 'vendedor', 'contador', 'visualizador'],
-      default: 'visualizador',
-    },
+    rol: { type: String, enum: ['admin', 'vendedor'], default: 'vendedor' },
     activo: { type: Boolean, default: true },
   },
   { timestamps: true }
@@ -25,5 +21,9 @@ usuarioSchema.pre('save', async function (next) {
 usuarioSchema.methods.matchPassword = async function (passwordIngresada) {
   return await bcrypt.compare(passwordIngresada, this.password)
 }
+
+usuarioSchema.set('toJSON', {
+  transform: (doc, ret) => { delete ret.password; return ret }
+})
 
 module.exports = mongoose.model('Usuario', usuarioSchema)
