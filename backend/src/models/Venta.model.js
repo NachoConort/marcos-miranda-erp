@@ -10,6 +10,7 @@ const itemVentaSchema = new mongoose.Schema({
   precioUnitario: { type: Number, required: true, min: 0 },
   descuento: { type: Number, default: 0, min: 0, max: 100 },
   subtotal: { type: Number, required: true },
+  porcentajeIva: { type: Number, enum: [0, 10.5, 21, 27], default: 21 },
 })
 
 const cobranzaSchema = new mongoose.Schema({

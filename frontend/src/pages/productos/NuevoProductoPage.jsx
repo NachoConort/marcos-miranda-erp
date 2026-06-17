@@ -11,7 +11,6 @@ export default function NuevoProductoPage() {
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm({
     defaultValues: {
       representaciones: [],
-      disponiblePara: ['ventas', 'compras'],
       moneda: 'pesos',
       porcentajeIva: 21,
       stockeable: false,

@@ -31,7 +31,18 @@ export const useFormData = (representacionId = null) => {
     }).then((r) => r.data),
   })
 
-  // Lista de precios de la representación seleccionada
+  // Vendedores (solo admin los ve todos, vendedor solo se ve a sí mismo)
+  const { data: vendedoresData, isLoading: loadingVendedores } = useQuery({
+    queryKey: ['form-vendedores', usuario._id, esAdmin],
+    queryFn: () => {
+      if (esAdmin) {
+        return api.get('/auth/usuarios', { params: { limit: 100 } }).then((r) => r.data)
+      }
+      return Promise.resolve({ usuarios: [usuario] })
+    },
+  })
+
+  // Lista de precios
   const { data: listaData } = useQuery({
     queryKey: ['form-lista-precios', usuario._id, representacionId],
     queryFn: () => api.get('/listas-precios', {
@@ -40,15 +51,11 @@ export const useFormData = (representacionId = null) => {
     enabled: !!representacionId,
   })
 
-  // Productos de la representación seleccionada
+  // Productos
   const { data: productosData } = useQuery({
     queryKey: ['form-productos', representacionId],
     queryFn: () => api.get('/productos', {
-      params: {
-        representacion: representacionId,
-        habilitado: true,
-        limit: 200,
-      },
+      params: { representacion: representacionId, habilitado: true, limit: 200 },
     }).then((r) => r.data),
     enabled: !!representacionId,
   })
@@ -56,8 +63,9 @@ export const useFormData = (representacionId = null) => {
   return {
     representaciones: repData?.representaciones || [],
     clientes: clientesData?.clientes || [],
+    vendedores: vendedoresData?.usuarios || [],
     listaPrecios: listaData?.items?.[0]?.items || [],
     productos: productosData?.productos || [],
-    loading: loadingRep || loadingClientes,
+    loading: loadingRep || loadingClientes || loadingVendedores,
   }
 }

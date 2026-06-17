@@ -10,6 +10,7 @@ const itemPresupuestoSchema = new mongoose.Schema({
   precioOriginalLista: { type: Number, min: 0 },
   descuento: { type: Number, default: 0, min: 0, max: 100 },
   subtotal: { type: Number, required: true },
+  porcentajeIva: { type: Number, enum: [0, 10.5, 21, 27], default: 21 },
 })
 
 const comprobanteSchema = new mongoose.Schema({
@@ -38,6 +39,12 @@ const presupuestoSchema = new mongoose.Schema(
     representacion: { type: mongoose.Schema.Types.ObjectId, ref: 'Representacion', required: true },
     listaPrecios: { type: mongoose.Schema.Types.ObjectId, ref: 'ListaPrecios' },
 
+    tipoComprobante: {
+  type: String,
+  enum: ['factura', 'comprobante'],
+  default: 'factura',
+},
+
     items: [itemPresupuestoSchema],
     descuentoGlobal: { type: Number, default: 0, min: 0, max: 100 },
     subtotal: { type: Number, required: true },
@@ -47,10 +54,10 @@ const presupuestoSchema = new mongoose.Schema(
     comprobante: { type: comprobanteSchema, default: null },
 
     estado: {
-      type: String,
-      enum: ['borrador', 'enviado', 'convertido', 'rechazado', 'vencido'],
-      default: 'borrador',
-    },
+  type: String,
+  enum: ['no_enviado', 'enviado', 'convertido', 'rechazado', 'vencido'],
+  default: 'no_enviado',
+},
 
     // Comisiones — se precargan de ConfigComision pero se pueden editar
     comisionRepresentacion: {

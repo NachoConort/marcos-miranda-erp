@@ -3,10 +3,11 @@ import { useForm, useFieldArray } from "react-hook-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ventasService } from "@/services/ventas.service";
-import api from "@/services/api";
-import useAuthStore from "@/store/auth.store";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { useFormData } from "@/hooks/useFormData";
+import SearchSelect from "@/components/shared/SearchSelect";
+import ResumenImpositivo from "@/components/shared/ResumenImpositivo";
+import api from "@/services/api";
+import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 
 const formatMoney = (n) =>
   new Intl.NumberFormat("es-AR", {
@@ -19,27 +20,30 @@ export default function NuevaVentaPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const pedidoOrigenId = searchParams.get("pedido");
-  const { usuario } = useAuthStore();
 
-  const [representacionSeleccionada, setRepresentacionSeleccionada] =
-    useState("");
+  const [representacionId, setRepresentacionId] = useState("");
+  const [clienteId, setClienteId] = useState("");
+  const [vendedorId, setVendedorId] = useState("");
   const [totales, setTotales] = useState({ subtotal: 0, total: 0 });
   const [totalCobranza, setTotalCobranza] = useState(0);
+
+  const {
+    representaciones,
+    clientes,
+    vendedores,
+    listaPrecios,
+    productos,
+    loading,
+  } = useFormData(representacionId);
+  const opcionesProductos = listaPrecios.length > 0 ? listaPrecios : productos;
 
   const { register, control, handleSubmit, watch, setValue } = useForm({
     defaultValues: {
       items: [
-        { descripcion: "", cantidad: 1, precioUnitario: 0, descuento: 0 },
+        { descripcion: "", cantidad: "", precioUnitario: "", descuento: "" },
       ],
       descuentoGlobal: 0,
-      comprobante: {
-        tipo: "factura",
-        letra: "A",
-        puntoVenta: "",
-        numero: "",
-        fechaEmision: "",
-        validacionAfip: "pendiente",
-      },
+      comprobante: { tipo: "factura", numero: "", fechaEmision: "" },
       cobranzas: [],
       condicionPago: "",
       estadoRemito: "sin_remito",
@@ -61,58 +65,93 @@ export default function NuevaVentaPage() {
   const descuentoGlobal = watch("descuentoGlobal");
   const cobranzas = watch("cobranzas");
 
-  // Calcular totales de items
+  // Serializar items para detectar cambios
+  const itemsSerializados = JSON.stringify(
+    items.map((i) => ({ p: i.precioUnitario, c: i.cantidad, d: i.descuento })),
+  );
+
   useEffect(() => {
     const subtotal = items.reduce(
       (acc, item) =>
         acc +
         (Number(item.precioUnitario) || 0) *
           (Number(item.cantidad) || 0) *
-          (1 - (Number(item.descuento) || 0) / 100),
+          (1 - Math.min(Number(item.descuento) || 0, 100) / 100),
       0,
     );
-    const total = subtotal * (1 - (Number(descuentoGlobal) || 0) / 100);
+    const total =
+      subtotal * (1 - Math.min(Number(descuentoGlobal) || 0, 100) / 100);
     setTotales({ subtotal, total });
-  }, [items, descuentoGlobal]);
+  }, [itemsSerializados, descuentoGlobal]);
 
-  // Calcular total cobranzas
   useEffect(() => {
     const total = cobranzas.reduce(
       (acc, c) => acc + (Number(c.monto) || 0) * (Number(c.cotizacion) || 1),
       0,
     );
     setTotalCobranza(total);
-  }, [cobranzas]);
+  }, [
+    JSON.stringify(cobranzas.map((c) => ({ m: c.monto, co: c.cotizacion }))),
+  ]);
 
-  // Si viene de un pedido, precargarlo
+  // Cargar datos del pedido origen
   const { data: pedidoData } = useQuery({
     queryKey: ["pedido", pedidoOrigenId],
     queryFn: () => api.get(`/pedidos/${pedidoOrigenId}`).then((r) => r.data),
     enabled: !!pedidoOrigenId,
-    onSuccess: (data) => {
-      const pedido = data.pedido;
-      setRepresentacionSeleccionada(pedido.representacion._id);
-      setValue("cliente", pedido.cliente._id);
-      pedido.items.forEach((item, i) => {
-        if (i === 0) setValue(`items.0`, item);
-        else appendItem(item);
-      });
-      setValue("descuentoGlobal", pedido.descuentoGlobal);
-    },
   });
 
-  const { representaciones, clientes, listaPrecios, productos, loading } =
-    useFormData(representacionSeleccionada);
-  const opcionesProductos = listaPrecios.length > 0 ? listaPrecios : productos;
+  useEffect(() => {
+    if (!pedidoData?.pedido) return;
+    const pedido = pedidoData.pedido;
 
-  const autocompletarItem = (index, itemId) => {
-    const item = listaPrecios.find((i) => i._id === itemId);
-    if (!item) return;
-    setValue(`items.${index}.descripcion`, item.descripcion);
-    setValue(`items.${index}.precioUnitario`, item.precio);
-    setValue(`items.${index}.codigo`, item.codigo || "");
-    setValue(`items.${index}.unidad`, item.unidad || "");
-    setValue(`items.${index}.listaPrecios`, item.descripcion);
+    setRepresentacionId(pedido.representacion?._id || pedido.representacion);
+    setClienteId(pedido.cliente?._id || pedido.cliente);
+    setVendedorId(pedido.vendedor?._id || pedido.vendedor);
+
+    const itemsPedido = pedido.items.map((item) => ({
+      descripcion: item.descripcion,
+      cantidad: item.cantidad,
+      precioUnitario: item.precioUnitario,
+      descuento: item.descuento || "",
+      codigo: item.codigo || "",
+      unidad: item.unidad || "",
+      // Usar el productoId guardado al crear el pedido
+      productoSeleccionadoId: item.productoId || "",
+    }));
+    setValue("items", itemsPedido);
+
+    setValue("descuentoGlobal", pedido.descuentoGlobal || 0);
+    if (pedido.notas) setValue("notas", pedido.notas);
+  }, [pedidoData]);
+
+  const autocompletarItem = (index, productoId) => {
+    setValue(`items.${index}.productoSeleccionadoId`, productoId);
+    setValue(`items.${index}.productoId`, productoId);
+
+    const itemLista = listaPrecios.find((i) => i._id === productoId);
+    if (itemLista) {
+      setValue(`items.${index}.descripcion`, itemLista.descripcion);
+      setValue(`items.${index}.precioUnitario`, itemLista.precio);
+      setValue(`items.${index}.codigo`, itemLista.codigo || "");
+      setValue(`items.${index}.unidad`, itemLista.unidad || "");
+      setValue(`items.${index}.productoLabel`, itemLista.descripcion);
+      // Buscar el IVA del producto en el catálogo
+      const prod = productos.find(
+        (p) => p._id === productoId || p.codigo === itemLista.codigo,
+      );
+      setValue(`items.${index}.porcentajeIva`, prod?.porcentajeIva ?? 21);
+      return;
+    }
+    const producto = productos.find((p) => p._id === productoId);
+    if (producto) {
+      setValue(`items.${index}.descripcion`, producto.nombre);
+      setValue(`items.${index}.precioUnitario`, producto.costo);
+      setValue(`items.${index}.codigo`, producto.codigo || "");
+      setValue(`items.${index}.unidad`, producto.unidadMedida || "");
+      setValue(`items.${index}.productoLabel`, producto.nombre);
+      setValue(`items.${index}.porcentajeIva`, producto.porcentajeIva ?? 21); // ← guardar IVA
+    }
   };
 
   const { mutate: crear, isPending } = useMutation({
@@ -123,12 +162,16 @@ export default function NuevaVentaPage() {
   });
 
   const onSubmit = (data) => {
+    if (!representacionId) return alert("Seleccioná una representación");
+    if (!clienteId) return alert("Seleccioná un cliente");
+    if (!vendedorId) return alert("Seleccioná un vendedor");
+
     const itemsCalculados = data.items.map((item) => ({
       ...item,
       subtotal:
         Number(item.precioUnitario) *
         Number(item.cantidad) *
-        (1 - (Number(item.descuento) || 0) / 100),
+        (1 - Math.min(Number(item.descuento) || 0, 100) / 100),
     }));
     const cobranzasCalculadas = (data.cobranzas || []).map((c) => ({
       ...c,
@@ -138,12 +181,36 @@ export default function NuevaVentaPage() {
     }));
     crear({
       ...data,
-      representacion: representacionSeleccionada,
+      vendedor: vendedorId,
+      representacion: representacionId,
+      cliente: clienteId,
       items: itemsCalculados,
       cobranzas: cobranzasCalculadas,
       pedidoOrigen: pedidoOrigenId || undefined,
     });
   };
+
+  // Opciones para SearchSelect
+  const opRepresentaciones = representaciones.map((r) => ({
+    value: r._id,
+    label: r.fantasia || r.nombre,
+    sublabel: r.razonSocial,
+  }));
+  const opClientes = clientes.map((c) => ({
+    value: c._id,
+    label: c.fantasia || c.razonSocial,
+    sublabel: c.cuit,
+  }));
+  const opVendedores = vendedores.map((v) => ({
+    value: v._id,
+    label: v.nombre,
+    sublabel: v.email,
+  }));
+  const opProductos = opcionesProductos.map((p) => ({
+    value: p._id,
+    label: p.descripcion || p.nombre,
+    sublabel: p.codigo ? `Cód: ${p.codigo}` : undefined,
+  }));
 
   const saldoPendiente = totales.total - totalCobranza;
 
@@ -172,58 +239,60 @@ export default function NuevaVentaPage() {
           <h3 className="text-sm font-medium text-gray-700 mb-4">
             Datos generales
           </h3>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-xs text-gray-500 mb-1">
                 Representación *
               </label>
-              <select
-                value={representacionSeleccionada}
-                onChange={(e) => setRepresentacionSeleccionada(e.target.value)}
-                className="input"
-                required
+              <SearchSelect
+                options={opRepresentaciones}
+                value={representacionId}
+                onChange={setRepresentacionId}
+                placeholder="Buscar representación..."
+                loading={loading}
                 disabled={!!pedidoOrigenId}
-              >
-                <option value="">
-                  {loading ? "Cargando..." : "Seleccionar representación"}
-                </option>
-                {representaciones.map((r) => (
-                  <option key={r._id} value={r._id}>
-                    {r.fantasia || r.nombre}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">
                 Cliente *
               </label>
-              <select
-                {...register("cliente", { required: true })}
-                className="input"
+              <SearchSelect
+                options={opClientes}
+                value={clienteId}
+                onChange={setClienteId}
+                placeholder="Buscar cliente..."
+                loading={loading}
                 disabled={!!pedidoOrigenId}
-              >
-                <option value="">
-                  {loading ? "Cargando..." : "Seleccionar cliente"}
-                </option>
-                {clientes.map((c) => (
-                  <option key={c._id} value={c._id}>
-                    {c.fantasia || c.razonSocial}
-                  </option>
-                ))}
-              </select>
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                Vendedor *
+              </label>
+              <SearchSelect
+                options={opVendedores}
+                value={vendedorId}
+                onChange={setVendedorId}
+                placeholder="Buscar vendedor..."
+                loading={loading}
+                disabled={!!pedidoOrigenId}
+              />
             </div>
           </div>
         </div>
 
-        {/* Comprobante */}
+        {/* Condición de pago — incluye comprobante */}
         <div className="card">
           <h3 className="text-sm font-medium text-gray-700 mb-4">
-            Comprobante
+            Condición de pago
           </h3>
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-3 gap-4">
+            {/* Comprobante */}
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Tipo *</label>
+              <label className="block text-xs text-gray-500 mb-1">
+                Tipo comprobante *
+              </label>
               <select
                 {...register("comprobante.tipo", { required: true })}
                 className="input"
@@ -234,26 +303,10 @@ export default function NuevaVentaPage() {
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">
-                Letra *
-              </label>
-              <select
-                {...register("comprobante.letra", { required: true })}
-                className="input"
-              >
-                {["A", "B", "C", "X"].map((l) => (
-                  <option key={l} value={l}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
                 Punto de venta *
               </label>
               <input
                 type="number"
-                min="1"
                 {...register("comprobante.puntoVenta", { required: true })}
                 placeholder="0001"
                 className="input"
@@ -265,7 +318,6 @@ export default function NuevaVentaPage() {
               </label>
               <input
                 type="number"
-                min="1"
                 {...register("comprobante.numero", { required: true })}
                 placeholder="00000001"
                 className="input"
@@ -281,27 +333,64 @@ export default function NuevaVentaPage() {
                 className="input"
               />
             </div>
+
+            {/* Condición y cobrador */}
             <div>
               <label className="block text-xs text-gray-500 mb-1">
-                Validación AFIP
+                Condición de pago
               </label>
-              <select
-                {...register("comprobante.validacionAfip")}
-                className="input"
-              >
-                <option value="pendiente">Pendiente</option>
-                <option value="validada">Validada</option>
-                <option value="no_validada">No validada</option>
+              <select {...register("condicionPago")} className="input">
+                <option value="">Sin especificar</option>
+                <option value="contado">Contado</option>
+                <option value="15_dias">15 días</option>
+                <option value="30_dias">30 días</option>
+                <option value="60_dias">60 días</option>
+                <option value="90_dias">90 días</option>
               </select>
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">
-                CAE (si aplica)
+                Cobrador
               </label>
               <input
-                {...register("comprobante.cae")}
-                placeholder="Código CAE"
+                {...register("cobrador.nombre")}
+                placeholder="Nombre del cobrador"
                 className="input"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                Tel. cobrador
+              </label>
+              <input
+                {...register("cobrador.telefono")}
+                placeholder="381 000-0000"
+                className="input"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Logística */}
+        <div className="card">
+          <h3 className="text-sm font-medium text-gray-700 mb-4">Logística</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">
+                Estado remito
+              </label>
+              <select {...register("estadoRemito")} className="input">
+                <option value="sin_remito">Sin remito</option>
+                <option value="pendiente">Pendiente</option>
+                <option value="entregado">Entregado</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Notas</label>
+              <textarea
+                {...register("notas")}
+                rows={2}
+                className="input resize-none"
               />
             </div>
           </div>
@@ -310,15 +399,24 @@ export default function NuevaVentaPage() {
         {/* Items */}
         <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-medium text-gray-700">Productos</h3>
+            <div>
+              <h3 className="text-sm font-medium text-gray-700">Productos</h3>
+              {representacionId && opcionesProductos.length > 0 && (
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {listaPrecios.length > 0
+                    ? "Usando lista de precios"
+                    : "Usando catálogo de productos"}
+                </p>
+              )}
+            </div>
             <button
               type="button"
               onClick={() =>
                 appendItem({
                   descripcion: "",
-                  cantidad: 1,
-                  precioUnitario: 0,
-                  descuento: 0,
+                  cantidad: "",
+                  precioUnitario: "",
+                  descuento: "",
                 })
               }
               className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
@@ -327,13 +425,11 @@ export default function NuevaVentaPage() {
             </button>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div className="grid grid-cols-12 gap-2 text-xs text-gray-400 px-1">
-              <span className="col-span-1">Código</span>
-              <span className="col-span-3">Descripción</span>
-              <span className="col-span-2">Lista precio</span>
-              <span className="col-span-1">Cant.</span>
-              <span className="col-span-1">P. Unit.</span>
+              <span className="col-span-4">Producto</span>
+              <span className="col-span-2">Precio unit.</span>
+              <span className="col-span-2">Cantidad</span>
               <span className="col-span-1">Desc %</span>
               <span className="col-span-2 text-right">Subtotal</span>
               <span className="col-span-1" />
@@ -342,89 +438,69 @@ export default function NuevaVentaPage() {
             {itemFields.map((field, index) => {
               const precio = Number(items[index]?.precioUnitario) || 0;
               const cant = Number(items[index]?.cantidad) || 0;
-              const desc = Number(items[index]?.descuento) || 0;
-              const subtotal = precio * cant * (1 - desc / 100);
+              const desc = Math.min(Number(items[index]?.descuento) || 0, 100);
+              const subtotal = precio * cant;
+              const subtotalConDesc = subtotal * (1 - desc / 100);
+              const descuentoMonto = subtotal - subtotalConDesc;
 
               return (
                 <div
                   key={field.id}
                   className="grid grid-cols-12 gap-2 items-center"
                 >
-                  <div className="col-span-1">
-                    <input
-                      {...register(`items.${index}.codigo`)}
-                      placeholder="COD"
-                      className="input text-xs"
-                    />
-                  </div>
-                  <div className="col-span-3">
-                    {opcionesProductos.length > 0 ? (
-                      <select
-                        onChange={(e) =>
-                          autocompletarItem(index, e.target.value)
-                        }
-                        className="input"
-                        disabled={!representacionSeleccionada}
-                      >
-                        <option value="">Seleccionar producto</option>
-                        {opcionesProductos.map((p) => (
-                          <option key={p._id} value={p._id}>
-                            {p.descripcion || p.nombre}{" "}
-                            {p.codigo ? `(${p.codigo})` : ""}
-                          </option>
-                        ))}
-                      </select>
+                  <div className="col-span-4">
+                    {opProductos.length > 0 ? (
+                      <SearchSelect
+                        options={opProductos}
+                        value={items[index]?.productoSeleccionadoId || ""}
+                        onChange={(id) => autocompletarItem(index, id)}
+                        placeholder="Buscar producto..."
+                        disabled={!representacionId}
+                      />
                     ) : (
                       <input
                         {...register(`items.${index}.descripcion`, {
                           required: true,
                         })}
-                        placeholder={
-                          representacionSeleccionada
-                            ? "Descripción"
-                            : "Seleccioná primero la representación"
-                        }
+                        placeholder="Descripción"
                         className="input"
                       />
                     )}
                   </div>
                   <div className="col-span-2">
                     <input
-                      {...register(`items.${index}.listaPrecios`)}
-                      placeholder="Lista"
-                      className="input text-xs"
-                    />
-                  </div>
-                  <div className="col-span-1">
-                    <input
                       type="number"
-                      step="1"
-                      min="1"
-                      {...register(`items.${index}.cantidad`)}
-                      className="input"
-                    />
-                  </div>
-                  <div className="col-span-1">
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
                       {...register(`items.${index}.precioUnitario`)}
+                      placeholder="0.00"
+                      className="input"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <input
+                      type="number"
+                      {...register(`items.${index}.cantidad`)}
+                      placeholder="0"
                       className="input"
                     />
                   </div>
                   <div className="col-span-1">
                     <input
                       type="number"
-                      step="0.1"
-                      min="0"
                       max="100"
                       {...register(`items.${index}.descuento`)}
+                      placeholder="0"
                       className="input"
                     />
                   </div>
-                  <div className="col-span-2 text-right text-sm font-medium text-gray-700">
-                    {formatMoney(subtotal)}
+                  <div className="col-span-2 text-right">
+                    <p className="text-sm font-medium text-gray-700">
+                      {formatMoney(subtotalConDesc)}
+                    </p>
+                    {descuentoMonto > 0 && (
+                      <p className="text-xs text-red-400">
+                        - {formatMoney(descuentoMonto)}
+                      </p>
+                    )}
                   </div>
                   <div className="col-span-1 flex justify-center">
                     {itemFields.length > 1 && (
@@ -440,36 +516,28 @@ export default function NuevaVentaPage() {
                 </div>
               );
             })}
+          </div>
 
-            {/* Totales items */}
-            <div className="flex justify-end pt-3 border-t border-gray-100 mt-3">
-              <div className="w-64 space-y-1.5">
-                <div className="flex justify-between text-sm text-gray-500">
-                  <span>Subtotal</span>
-                  <span>{formatMoney(totales.subtotal)}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm text-gray-500">
-                  <div className="flex items-center gap-2">
-                    <span>Desc. global</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.1"
-                      {...register("descuentoGlobal")}
-                      className="w-12 border border-gray-200 rounded px-1.5 py-0.5 text-xs text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                    <span>%</span>
-                  </div>
-                  <span className="text-red-400">
-                    - {formatMoney(totales.subtotal - totales.total)}
-                  </span>
-                </div>
-                <div className="flex justify-between font-semibold text-gray-900 border-t border-gray-100 pt-1.5">
-                  <span>Total</span>
-                  <span>{formatMoney(totales.total)}</span>
+          {/* Totales */}
+          <div className="flex justify-end pt-4 border-t border-gray-100 mt-4">
+            <div className="w-80">
+              <div className="flex items-center justify-between text-sm text-gray-500 mb-3">
+                <div className="flex items-center gap-2">
+                  <span>Descuento global</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    {...register("descuentoGlobal", { valueAsNumber: true })}
+                    className="w-14 border border-gray-200 rounded px-1.5 py-0.5 text-xs text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <span>%</span>
                 </div>
               </div>
+              <ResumenImpositivo
+                items={items}
+                descuentoGlobal={descuentoGlobal}
+              />
             </div>
           </div>
         </div>
@@ -493,7 +561,7 @@ export default function NuevaVentaPage() {
                   referencia: "",
                   moneda: "pesos",
                   cotizacion: 1,
-                  monto: 0,
+                  monto: "",
                 })
               }
               className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
@@ -504,7 +572,7 @@ export default function NuevaVentaPage() {
 
           {cobranzaFields.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-4">
-              Sin pagos registrados — la venta quedará pendiente de cobro
+              Sin pagos — la venta quedará pendiente de cobro
             </p>
           ) : (
             <div className="space-y-3">
@@ -535,7 +603,7 @@ export default function NuevaVentaPage() {
                       </div>
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">
-                          Fecha movimiento *
+                          Fecha *
                         </label>
                         <input
                           type="date"
@@ -593,8 +661,6 @@ export default function NuevaVentaPage() {
                           </label>
                           <input
                             type="number"
-                            step="0.01"
-                            min="1"
                             {...register(`cobranzas.${index}.cotizacion`)}
                             className="input"
                           />
@@ -606,11 +672,10 @@ export default function NuevaVentaPage() {
                         </label>
                         <input
                           type="number"
-                          step="0.01"
-                          min="0"
                           {...register(`cobranzas.${index}.monto`, {
                             required: true,
                           })}
+                          placeholder="0"
                           className="input"
                         />
                       </div>
@@ -634,7 +699,7 @@ export default function NuevaVentaPage() {
                 );
               })}
 
-              {/* Resumen cobranza */}
+              {/* Resumen */}
               <div className="flex justify-end pt-2">
                 <div className="w-64 space-y-1.5 text-sm">
                   <div className="flex justify-between text-gray-500">
@@ -657,87 +722,6 @@ export default function NuevaVentaPage() {
               </div>
             </div>
           )}
-        </div>
-
-        {/* Condiciones y logística */}
-        <div className="grid grid-cols-2 gap-5">
-          <div className="card">
-            <h3 className="text-sm font-medium text-gray-700 mb-4">
-              Condición de pago
-            </h3>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">
-                  Condición
-                </label>
-                <select {...register("condicionPago")} className="input">
-                  <option value="">Sin especificar</option>
-                  <option value="contado">Contado</option>
-                  <option value="15_dias">15 días</option>
-                  <option value="30_dias">30 días</option>
-                  <option value="60_dias">60 días</option>
-                  <option value="90_dias">90 días</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">
-                  Cobrador
-                </label>
-                <input
-                  {...register("cobrador.nombre")}
-                  placeholder="Nombre del cobrador"
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">
-                  Tel. cobrador
-                </label>
-                <input
-                  {...register("cobrador.telefono")}
-                  placeholder="381 000-0000"
-                  className="input"
-                />
-              </div>
-            </div>
-          </div>
-          <div className="card">
-            <h3 className="text-sm font-medium text-gray-700 mb-4">
-              Logística y otros
-            </h3>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">
-                  Estado remito
-                </label>
-                <select {...register("estadoRemito")} className="input">
-                  <option value="sin_remito">Sin remito</option>
-                  <option value="pendiente">Pendiente</option>
-                  <option value="entregado">Entregado</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">
-                  Provincia
-                </label>
-                <input
-                  {...register("provincia")}
-                  placeholder="Ej: Tucumán"
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">
-                  Notas
-                </label>
-                <textarea
-                  {...register("notas")}
-                  rows={2}
-                  className="input resize-none"
-                />
-              </div>
-            </div>
-          </div>
         </div>
 
         <div className="flex justify-end gap-3">

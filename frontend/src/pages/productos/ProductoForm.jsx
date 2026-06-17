@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import MarcaSelect from '@/components/shared/MarcaSelect'
 import api from '@/services/api'
 
 const IVA_OPTIONS = [
@@ -17,7 +18,7 @@ export default function ProductoForm({ register, watch, setValue, errors }) {
   const representacionesDisponibles = representacionesData?.items || []
   const representacionesSeleccionadas = watch('representaciones') || []
   const stockeable = watch('stockeable')
-  const disponiblePara = watch('disponiblePara') || []
+  const marcaId = watch('marca')
 
   const toggleRepresentacion = (id) => {
     const actuales = representacionesSeleccionadas
@@ -25,14 +26,6 @@ export default function ProductoForm({ register, watch, setValue, errors }) {
       ? actuales.filter((r) => r !== id)
       : [...actuales, id]
     setValue('representaciones', nuevo)
-  }
-
-  const toggleDisponible = (valor) => {
-    const actuales = disponiblePara
-    const nuevo = actuales.includes(valor)
-      ? actuales.filter((d) => d !== valor)
-      : [...actuales, valor]
-    setValue('disponiblePara', nuevo)
   }
 
   return (
@@ -48,11 +41,11 @@ export default function ProductoForm({ register, watch, setValue, errors }) {
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Código de barra</label>
-            <input {...register('codigoBarra')} className="input font-mono" placeholder="Ej: 7790001234567" />
+            <input {...register('codigoBarra')} className="input font-mono" placeholder="7790001234567" />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Tipo de producto</label>
-            <input {...register('tipoProducto')} className="input" placeholder="Ej: Bebida, Snack" />
+            <label className="block text-xs text-gray-500 mb-1">Marca</label>
+            <MarcaSelect value={marcaId} onChange={(id) => setValue('marca', id)} />
           </div>
           <div className="col-span-2">
             <label className="block text-xs text-gray-500 mb-1">Nombre *</label>
@@ -64,8 +57,8 @@ export default function ProductoForm({ register, watch, setValue, errors }) {
             {errors.nombre && <p className="text-xs text-red-500 mt-1">{errors.nombre.message}</p>}
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Marca</label>
-            <input {...register('marca')} className="input" placeholder="Ej: Coca Cola" />
+            <label className="block text-xs text-gray-500 mb-1">Unidad de medida</label>
+            <input {...register('unidadMedida')} className="input" placeholder="Ej: unidad, caja, kg" />
           </div>
           <div className="col-span-3">
             <label className="block text-xs text-gray-500 mb-1">Descripción</label>
@@ -77,7 +70,7 @@ export default function ProductoForm({ register, watch, setValue, errors }) {
       {/* Clasificación */}
       <div className="card">
         <h3 className="text-sm font-medium text-gray-700 mb-4">Clasificación</h3>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 gap-4 mb-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Rubro</label>
             <input {...register('rubro')} className="input" placeholder="Ej: Bebidas" />
@@ -86,28 +79,24 @@ export default function ProductoForm({ register, watch, setValue, errors }) {
             <label className="block text-xs text-gray-500 mb-1">Sub rubro</label>
             <input {...register('subRubro')} className="input" placeholder="Ej: Gaseosas" />
           </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Unidad de medida</label>
-            <input {...register('unidadMedida')} className="input" placeholder="Ej: unidad, caja, kg" />
-          </div>
         </div>
 
         {/* Representaciones */}
-        <div className="mt-4">
+        <div>
           <label className="block text-xs text-gray-500 mb-2">Representaciones</label>
           {representacionesDisponibles.length === 0 ? (
             <p className="text-xs text-gray-400">No hay representaciones disponibles</p>
           ) : (
             <div className="flex flex-wrap gap-2">
               {representacionesDisponibles.map((r) => {
-                const seleccionado = representacionesSeleccionadas.includes(r._id)
+                const sel = representacionesSeleccionadas.includes(r._id)
                 return (
                   <button
                     key={r._id}
                     type="button"
                     onClick={() => toggleRepresentacion(r._id)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                      seleccionado
+                      sel
                         ? 'bg-blue-600 text-white border-blue-600'
                         : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'
                     }`}
@@ -121,18 +110,13 @@ export default function ProductoForm({ register, watch, setValue, errors }) {
         </div>
       </div>
 
-      {/* Precios y costos */}
+      {/* Precio y costo */}
       <div className="card">
-        <h3 className="text-sm font-medium text-gray-700 mb-4">Precio y costos</h3>
+        <h3 className="text-sm font-medium text-gray-700 mb-4">Precio y costo</h3>
         <div className="grid grid-cols-3 gap-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Costo</label>
-            <input
-              type="number" step="0.01" min="0"
-              {...register('costo')}
-              className="input"
-              placeholder="0.00"
-            />
+            <input type="number" step="0.01" min="0" {...register('costo')} className="input" placeholder="0.00" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Moneda</label>
@@ -142,7 +126,7 @@ export default function ProductoForm({ register, watch, setValue, errors }) {
             </select>
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Porcentaje IVA</label>
+            <label className="block text-xs text-gray-500 mb-1">IVA</label>
             <select {...register('porcentajeIva', { valueAsNumber: true })} className="input">
               {IVA_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
@@ -152,58 +136,42 @@ export default function ProductoForm({ register, watch, setValue, errors }) {
         </div>
       </div>
 
-      {/* Stock y disponibilidad */}
+      {/* Stock */}
       <div className="card">
-        <h3 className="text-sm font-medium text-gray-700 mb-4">Stock y disponibilidad</h3>
-        <div className="grid grid-cols-3 gap-4">
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-              <input type="checkbox" {...register('stockeable')} className="rounded" />
-              Stockeable
-            </label>
-          </div>
+        <h3 className="text-sm font-medium text-gray-700 mb-4">Stock</h3>
+        <div className="space-y-3">
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input type="checkbox" {...register('stockeable')} className="rounded" />
+            Producto stockeable
+          </label>
+
           {stockeable && (
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Cantidad disponible</label>
-              <input
-                type="number" min="0" step="1"
-                {...register('cantidadDisponible', { valueAsNumber: true })}
-                className="input"
-              />
+            <div className="pl-5 space-y-3 border-l-2 border-gray-100">
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <input type="checkbox" {...register('aceptaStockNegativo')} className="rounded" />
+                Acepta stock negativo
+              </label>
+              <div className="w-48">
+                <label className="block text-xs text-gray-500 mb-1">Cantidad disponible</label>
+                <input
+                  type="number"
+                  {...register('cantidadDisponible', { valueAsNumber: true })}
+                  className="input"
+                  placeholder="0"
+                />
+              </div>
             </div>
           )}
         </div>
+      </div>
 
-        {/* Disponible para */}
-        <div className="mt-4">
-          <label className="block text-xs text-gray-500 mb-2">Disponible para</label>
-          <div className="flex gap-3">
-            {['ventas', 'compras'].map((opcion) => (
-              <button
-                key={opcion}
-                type="button"
-                onClick={() => toggleDisponible(opcion)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors capitalize ${
-                  disponiblePara.includes(opcion)
-                    ? opcion === 'ventas'
-                      ? 'bg-green-600 text-white border-green-600'
-                      : 'bg-orange-500 text-white border-orange-500'
-                    : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                {opcion}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Habilitado */}
-        <div className="mt-4">
-          <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-            <input type="checkbox" {...register('habilitado')} className="rounded" />
-            Habilitado
-          </label>
-        </div>
+      {/* Estado */}
+      <div className="card">
+        <h3 className="text-sm font-medium text-gray-700 mb-3">Estado</h3>
+        <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+          <input type="checkbox" {...register('habilitado')} className="rounded" />
+          Producto habilitado
+        </label>
       </div>
     </div>
   )

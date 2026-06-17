@@ -6,15 +6,12 @@ const productoSchema = new mongoose.Schema(
     codigoBarra: { type: String, trim: true },
     nombre: { type: String, required: true, trim: true },
     descripcion: { type: String, trim: true },
-    marca: { type: String, trim: true },
+    marca: { type: mongoose.Schema.Types.ObjectId, ref: 'Marca' },
     rubro: { type: String, trim: true },
     subRubro: { type: String, trim: true },
-    tipoProducto: { type: String, trim: true },
 
-    // Puede pertenecer a varias representaciones
     representaciones: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Representacion' }],
 
-    // Precios y costos
     costo: { type: Number, default: 0, min: 0 },
     moneda: { type: String, enum: ['pesos', 'dolar'], default: 'pesos' },
     porcentajeIva: {
@@ -23,16 +20,16 @@ const productoSchema = new mongoose.Schema(
       default: 21,
     },
 
-    // Unidad y stock
-    unidadMedida: { type: String, trim: true }, // ej: "unidad", "caja", "kg"
+    unidadMedida: { type: String, trim: true },
     stockeable: { type: Boolean, default: false },
-    cantidadDisponible: { type: Number, default: 0, min: 0 },
+    aceptaStockNegativo: { type: Boolean, default: false }, // solo aplica si stockeable = true
+    cantidadDisponible: { type: Number, default: 0 },       // puede ser negativo si aceptaStockNegativo
 
-    // Disponibilidad
+    // Solo para ventas — se eliminó 'compras'
     disponiblePara: {
       type: [String],
-      enum: ['compras', 'ventas'],
-      default: ['compras', 'ventas'],
+      enum: ['ventas'],
+      default: ['ventas'],
     },
     habilitado: { type: Boolean, default: true },
 
@@ -41,7 +38,6 @@ const productoSchema = new mongoose.Schema(
   { timestamps: true }
 )
 
-// Índice para búsqueda rápida
-productoSchema.index({ nombre: 'text', codigo: 'text', codigoBarra: 'text', marca: 'text' })
+productoSchema.index({ nombre: 'text', codigo: 'text', codigoBarra: 'text' })
 
 module.exports = mongoose.models.Producto || mongoose.model('Producto', productoSchema)

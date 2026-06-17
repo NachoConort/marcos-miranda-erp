@@ -7,4 +7,13 @@ export const productosService = {
   editar: (id, data) => api.put(`/productos/${id}`, data).then((r) => r.data),
   toggleHabilitado: (id) => api.patch(`/productos/${id}/habilitar`).then((r) => r.data),
   eliminar: (id) => api.delete(`/productos/${id}`).then((r) => r.data),
+  importarExcel: (archivo) => {
+    const form = new FormData()
+    form.append('archivo', archivo)
+    return api.post('/productos/importar-excel', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then((r) => r.data)
+  },
+  descargarPlantilla: () =>
+    api.get('/productos/plantilla-excel', { responseType: 'blob' }).then((r) => r.data),
 }

@@ -2,20 +2,48 @@ const Pedido = require('../models/Pedido.model')
 const Presupuesto = require('../models/Presupuesto.model')
 const PermisoVendedor = require('../models/PermisoVendedor.model')
 
-const calcularItems = (items) =>
-  items.map((item) => ({
-    ...item,
-    subtotal: Math.round(
-      Number(item.precioUnitario) * Number(item.cantidad) * (1 - (Number(item.descuento) || 0) / 100) * 100
-    ) / 100,
-  }))
+const calcularTotalesPedido = (items, descuentoGlobal = 0, tipoFacturacion = 'facturado', porcentajeIva = 21) => {
+  // Subtotal bruto (sin descuentos de items)
+  const subtotalBruto = items.reduce((acc, item) =>
+    acc + Number(item.precioUnitario) * Number(item.cantidad), 0)
 
-const calcularTotales = (items, descuentoGlobal = 0) => {
-  const subtotal = items.reduce((acc, i) => acc + i.subtotal, 0)
-  const total = subtotal * (1 - descuentoGlobal / 100)
+  // Descuentos por item
+  const itemsCalculados = items.map((item) => {
+    const subtotal = Number(item.precioUnitario) * Number(item.cantidad)
+    const descuentoItem = Number(item.descuento) || 0
+    const subtotalConDescuento = subtotal * (1 - descuentoItem / 100)
+    return {
+      ...item,
+      descuento: Math.min(descuentoItem, 100), // límite 100%
+      subtotal: Math.round(subtotal * 100) / 100,
+      subtotalConDescuento: Math.round(subtotalConDescuento * 100) / 100,
+    }
+  })
+
+  // Suma después de descuentos por item
+  const subtotalTrasItems = itemsCalculados.reduce((acc, i) => acc + i.subtotalConDescuento, 0)
+
+  // Descuento global (límite 100%)
+  const descGlobal = Math.min(Number(descuentoGlobal) || 0, 100)
+  const subtotalNeto = subtotalTrasItems * (1 - descGlobal / 100)
+
+  // Total descuentos
+  const totalDescuentos = subtotalBruto - subtotalNeto
+
+  // IVA solo si es facturado
+  const totalIva = tipoFacturacion === 'facturado'
+    ? Math.round(subtotalNeto * (porcentajeIva / 100) * 100) / 100
+    : 0
+
+  const total = Math.round((subtotalNeto + totalIva) * 100) / 100
+
   return {
-    subtotal: Math.round(subtotal * 100) / 100,
-    total: Math.round(total * 100) / 100,
+    itemsCalculados,
+    subtotalBruto: Math.round(subtotalBruto * 100) / 100,
+    totalDescuentos: Math.round(totalDescuentos * 100) / 100,
+    subtotalNeto: Math.round(subtotalNeto * 100) / 100,
+    totalIva,
+    total,
   }
 }
 
@@ -29,9 +57,9 @@ const getPedidos = async (req, res) => {
     if (estado) filtros.estado = estado
 
     const pedidos = await Pedido.find(filtros)
-      .populate('cliente', 'nombre razonSocial')
+      .populate('cliente', 'nombre razonSocial fantasia')
       .populate('vendedor', 'nombre')
-      .populate('representacion', 'nombre')
+      .populate('representacion', 'nombre fantasia')
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(Number(limit))
@@ -47,9 +75,9 @@ const getPedidos = async (req, res) => {
 const getPedido = async (req, res) => {
   try {
     const pedido = await Pedido.findById(req.params.id)
-      .populate('cliente', 'nombre razonSocial cuit condicionIva')
+      .populate('cliente', 'nombre razonSocial fantasia cuit condicionIva')
       .populate('vendedor', 'nombre')
-      .populate('representacion', 'nombre')
+      .populate('representacion', 'nombre fantasia')
       .populate('presupuestoOrigen', 'numero')
 
     if (!pedido) return res.status(404).json({ success: false, message: 'Pedido no encontrado' })
@@ -69,10 +97,10 @@ const crearPedido = async (req, res) => {
   try {
     const {
       cliente, representacion, items, descuentoGlobal = 0,
+      tipoFacturacion = 'facturado', porcentajeIva = 21,
       notas, presupuestoOrigen,
     } = req.body
 
-    // Verificar permiso
     const permiso = await PermisoVendedor.findOne({
       vendedor: req.user._id,
       representacion,
@@ -85,22 +113,26 @@ const crearPedido = async (req, res) => {
       })
     }
 
-    const itemsCalculados = calcularItems(items)
-    const { subtotal, total } = calcularTotales(itemsCalculados, descuentoGlobal)
+    const { itemsCalculados, subtotalBruto, totalDescuentos, subtotalNeto, totalIva, total } =
+      calcularTotalesPedido(items, descuentoGlobal, tipoFacturacion, porcentajeIva)
 
     const pedido = await Pedido.create({
       vendedor: req.user._id,
       cliente,
       representacion,
       presupuestoOrigen,
+      tipoFacturacion,
+      porcentajeIva,
       items: itemsCalculados,
-      descuentoGlobal,
-      subtotal,
+      descuentoGlobal: Math.min(Number(descuentoGlobal), 100),
+      subtotalBruto,
+      totalDescuentos,
+      subtotalNeto,
+      totalIva,
       total,
       notas,
     })
 
-    // Si viene de presupuesto, marcarlo como convertido
     if (presupuestoOrigen) {
       await Presupuesto.findByIdAndUpdate(presupuestoOrigen, {
         estado: 'convertido',
@@ -109,8 +141,8 @@ const crearPedido = async (req, res) => {
     }
 
     const pedidoPopulado = await Pedido.findById(pedido._id)
-      .populate('cliente', 'nombre')
-      .populate('representacion', 'nombre')
+      .populate('cliente', 'nombre razonSocial fantasia')
+      .populate('representacion', 'nombre fantasia')
 
     res.status(201).json({ success: true, pedido: pedidoPopulado })
   } catch (error) {
@@ -118,22 +150,32 @@ const crearPedido = async (req, res) => {
   }
 }
 
-// PUT /api/pedidos/:id — editar pedido (solo si está pendiente)
+// PUT /api/pedidos/:id
 const editarPedido = async (req, res) => {
   try {
     const pedido = await Pedido.findById(req.params.id)
     if (!pedido) return res.status(404).json({ success: false, message: 'Pedido no encontrado' })
     if (!['pendiente', 'enviado'].includes(pedido.estado)) {
-      return res.status(400).json({ success: false, message: 'No se puede editar un pedido completado o cancelado' })
+      return res.status(400).json({ success: false, message: 'No se puede editar este pedido' })
     }
 
-    const { items, descuentoGlobal = 0, notas } = req.body
-    const itemsCalculados = calcularItems(items)
-    const { subtotal, total } = calcularTotales(itemsCalculados, descuentoGlobal)
+    const { items, descuentoGlobal = 0, tipoFacturacion, porcentajeIva, notas } = req.body
+    const { itemsCalculados, subtotalBruto, totalDescuentos, subtotalNeto, totalIva, total } =
+      calcularTotalesPedido(
+        items,
+        descuentoGlobal,
+        tipoFacturacion || pedido.tipoFacturacion,
+        porcentajeIva || pedido.porcentajeIva
+      )
 
     pedido.items = itemsCalculados
-    pedido.descuentoGlobal = descuentoGlobal
-    pedido.subtotal = subtotal
+    pedido.descuentoGlobal = Math.min(Number(descuentoGlobal), 100)
+    pedido.tipoFacturacion = tipoFacturacion || pedido.tipoFacturacion
+    pedido.porcentajeIva = porcentajeIva || pedido.porcentajeIva
+    pedido.subtotalBruto = subtotalBruto
+    pedido.totalDescuentos = totalDescuentos
+    pedido.subtotalNeto = subtotalNeto
+    pedido.totalIva = totalIva
     pedido.total = total
     pedido.notas = notas
     await pedido.save()
@@ -144,14 +186,17 @@ const editarPedido = async (req, res) => {
   }
 }
 
-// PATCH /api/pedidos/:id/estado
+// PATCH /api/pedidos/:id/estado — ya no permite borrar, solo cancelar
 const cambiarEstado = async (req, res) => {
   try {
     const { estado } = req.body
     const pedido = await Pedido.findById(req.params.id)
     if (!pedido) return res.status(404).json({ success: false, message: 'Pedido no encontrado' })
     if (pedido.estado === 'completado') {
-      return res.status(400).json({ success: false, message: 'El pedido ya está completado' })
+      return res.status(400).json({ success: false, message: 'No se puede modificar un pedido completado' })
+    }
+    if (pedido.estado === 'cancelado') {
+      return res.status(400).json({ success: false, message: 'El pedido ya está cancelado' })
     }
 
     pedido.estado = estado
@@ -162,20 +207,12 @@ const cambiarEstado = async (req, res) => {
   }
 }
 
-// DELETE /api/pedidos/:id — solo si no está completado
+// DELETE deshabilitado — se usa cancelar en su lugar
 const eliminarPedido = async (req, res) => {
-  try {
-    const pedido = await Pedido.findById(req.params.id)
-    if (!pedido) return res.status(404).json({ success: false, message: 'Pedido no encontrado' })
-    if (pedido.estado === 'completado') {
-      return res.status(400).json({ success: false, message: 'No se puede eliminar un pedido completado' })
-    }
-
-    await pedido.deleteOne()
-    res.json({ success: true, message: 'Pedido eliminado' })
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message })
-  }
+  res.status(400).json({
+    success: false,
+    message: 'Los pedidos no se pueden eliminar. Usá la opción Cancelar.',
+  })
 }
 
 module.exports = { getPedidos, getPedido, crearPedido, editarPedido, cambiarEstado, eliminarPedido }

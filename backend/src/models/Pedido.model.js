@@ -2,6 +2,7 @@ const mongoose = require('mongoose')
 
 const itemPedidoSchema = new mongoose.Schema({
   itemListaId: { type: mongoose.Schema.Types.ObjectId },
+  productoId: { type: mongoose.Schema.Types.ObjectId, ref: 'Producto' }, // ← agregar
   codigo: { type: String, trim: true },
   descripcion: { type: String, required: true, trim: true },
   unidad: { type: String, trim: true },
@@ -10,6 +11,8 @@ const itemPedidoSchema = new mongoose.Schema({
   precioOriginalLista: { type: Number, min: 0 },
   descuento: { type: Number, default: 0, min: 0, max: 100 },
   subtotal: { type: Number, required: true },
+  subtotalConDescuento: { type: Number, required: true },
+  porcentajeIva: { type: Number, enum: [0, 10.5, 21, 27], default: 21 },
 })
 
 const pedidoSchema = new mongoose.Schema(
@@ -18,19 +21,32 @@ const pedidoSchema = new mongoose.Schema(
     vendedor: { type: mongoose.Schema.Types.ObjectId, ref: 'Usuario', required: true },
     cliente: { type: mongoose.Schema.Types.ObjectId, ref: 'Cliente', required: true },
     representacion: { type: mongoose.Schema.Types.ObjectId, ref: 'Representacion', required: true },
-    // Puede venir de un presupuesto o crearse directo
     presupuestoOrigen: { type: mongoose.Schema.Types.ObjectId, ref: 'Presupuesto' },
+
+    // Tipo de facturación
+    tipoFacturacion: {
+      type: String,
+      enum: ['facturado', 'comprobante'],
+      default: 'facturado',
+    },
+    porcentajeIva: { type: Number, default: 21 }, // solo aplica si tipoFacturacion = facturado
+
     items: [itemPedidoSchema],
     descuentoGlobal: { type: Number, default: 0, min: 0, max: 100 },
-    subtotal: { type: Number, required: true },
-    total: { type: Number, required: true },
+
+    // Totales desglosados
+    subtotalBruto: { type: Number, required: true },     // sin descuentos
+    totalDescuentos: { type: Number, default: 0 },       // suma de todos los descuentos
+    subtotalNeto: { type: Number, required: true },      // después de descuentos, antes de IVA
+    totalIva: { type: Number, default: 0 },              // monto IVA
+    total: { type: Number, required: true },             // total final
+
     estado: {
       type: String,
       enum: ['pendiente', 'enviado', 'completado', 'cancelado'],
       default: 'pendiente',
     },
     notas: { type: String },
-    // Referencia a la venta generada cuando se confirma
     ventaGenerada: { type: mongoose.Schema.Types.ObjectId, ref: 'Venta' },
   },
   { timestamps: true }
