@@ -7,7 +7,13 @@ const connectDB = require('./config/database')
 const app = express()
 connectDB()
 
-app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }))
+app.use(cors({
+  origin: [
+    process.env.CLIENT_URL,
+    'http://localhost:5173', // para seguir trabajando en local
+  ],
+  credentials: true,
+}))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 app.use(morgan('dev'))
