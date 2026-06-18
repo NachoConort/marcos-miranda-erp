@@ -7,6 +7,7 @@ const connectDB = require('./config/database')
 const app = express()
 connectDB()
 
+
 app.use(cors({
   origin: [
     process.env.CLIENT_URL,
