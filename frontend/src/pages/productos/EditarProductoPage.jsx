@@ -48,6 +48,7 @@ export default function EditarProductoPage() {
       tipoProducto: p.tipoProducto,
       representaciones: p.representaciones?.map((r) => r._id || r) || [],
       costo: p.costo,
+      tipoPrecio: p.tipoPrecio || "neto_mas_iva",
       moneda: p.moneda,
       porcentajeIva: p.porcentajeIva,
       unidadMedida: p.unidadMedida,

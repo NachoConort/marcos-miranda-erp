@@ -2,6 +2,7 @@ const Producto = require('../models/Producto.model')
 const Marca = require('../models/Marca.model')
 const XLSX = require('xlsx')
 const Representacion = require('../models/Representacion.model')
+const ImportacionExcel = require('../models/ImportacionExcel.model')
 
 // GET /api/productos
 const getProductos = async (req, res) => {
@@ -72,6 +73,7 @@ const crearProducto = async (req, res) => {
   }
 }
 
+
 // PUT /api/productos/:id
 const editarProducto = async (req, res) => {
   try {
@@ -116,7 +118,85 @@ const eliminarProducto = async (req, res) => {
   }
 }
 
-// POST /api/productos/importar-excel
+// Valores válidos permitidos — única fuente de verdad
+const IVA_VALIDOS = [0, 10.5, 21, 27]
+const MONEDAS_VALIDAS = ['pesos', 'dolar']
+const BOOL_VALIDOS = ['si', 'no']
+
+// Convierte y valida un valor booleano tipo "si"/"no"
+const parseBool = (valor, nombreCampo, errores, opcional = true) => {
+  const texto = String(valor ?? '').trim().toLowerCase()
+  if (texto === '') {
+    if (opcional) return false
+    errores.push(`el campo '${nombreCampo}' es requerido`)
+    return null
+  }
+  if (!BOOL_VALIDOS.includes(texto)) {
+    errores.push(`'${nombreCampo}' tiene un valor inválido ("${valor}"). Debe ser "si" o "no"`)
+    return null
+  }
+  return texto === 'si'
+}
+
+// Convierte y valida un número dentro de una lista cerrada de opciones válidas
+const parseEnumNumerico = (valor, nombreCampo, opcionesValidas, errores, valorPorDefecto = null) => {
+  const texto = String(valor ?? '').trim()
+  if (texto === '') {
+    if (valorPorDefecto !== null) return valorPorDefecto
+    errores.push(`el campo '${nombreCampo}' es requerido`)
+    return null
+  }
+  const numero = Number(texto.replace(',', '.'))
+  if (isNaN(numero)) {
+    errores.push(`'${nombreCampo}' debe ser un número (se recibió "${valor}")`)
+    return null
+  }
+  if (!opcionesValidas.includes(numero)) {
+    errores.push(
+      `'${nombreCampo}' tiene un valor no permitido (${numero}). Valores válidos: ${opcionesValidas.join(', ')}`
+    )
+    return null
+  }
+  return numero
+}
+
+// Convierte y valida un número decimal libre (costo, cantidad) — no de lista cerrada
+const parseNumero = (valor, nombreCampo, errores, { permitirNegativo = false, opcional = true, porDefecto = 0 } = {}) => {
+  const texto = String(valor ?? '').trim()
+  if (texto === '') {
+    if (opcional) return porDefecto
+    errores.push(`el campo '${nombreCampo}' es requerido`)
+    return null
+  }
+  const numero = Number(texto.replace(',', '.'))
+  if (isNaN(numero)) {
+    errores.push(`'${nombreCampo}' debe ser un número (se recibió "${valor}")`)
+    return null
+  }
+  if (!permitirNegativo && numero < 0) {
+    errores.push(`'${nombreCampo}' no puede ser negativo (se recibió ${numero})`)
+    return null
+  }
+  return numero
+}
+
+// Convierte y valida un texto de lista cerrada (moneda)
+const parseEnumTexto = (valor, nombreCampo, opcionesValidas, errores, valorPorDefecto = null) => {
+  const texto = String(valor ?? '').trim().toLowerCase()
+  if (texto === '') {
+    if (valorPorDefecto !== null) return valorPorDefecto
+    errores.push(`el campo '${nombreCampo}' es requerido`)
+    return null
+  }
+  if (!opcionesValidas.includes(texto)) {
+    errores.push(
+      `'${nombreCampo}' tiene un valor no permitido ("${valor}"). Valores válidos: ${opcionesValidas.join(', ')}`
+    )
+    return null
+  }
+  return texto
+}
+
 // POST /api/productos/importar-excel
 const importarExcel = async (req, res) => {
   try {
@@ -132,12 +212,9 @@ const importarExcel = async (req, res) => {
       return res.status(400).json({ success: false, message: 'El archivo está vacío' })
     }
 
-    // Validar que existan las columnas obligatorias en la primera fila
+    // Columnas obligatorias que deben existir como encabezado
     const COLUMNAS_OBLIGATORIAS = ['nombre', 'rubro']
-    const primeraFila = filas[0]
-    const columnasFaltantes = COLUMNAS_OBLIGATORIAS.filter(
-      (col) => !(col in primeraFila)
-    )
+    const columnasFaltantes = COLUMNAS_OBLIGATORIAS.filter((col) => !(col in filas[0]))
     if (columnasFaltantes.length > 0) {
       return res.status(400).json({
         success: false,
@@ -145,11 +222,8 @@ const importarExcel = async (req, res) => {
       })
     }
 
-    // Pre-cargar representaciones para resolver por nombre
     const todasRepresentaciones = await Representacion.find({}, '_id fantasia nombre')
-
     const resolverRepresentacion = (nombreRep) => {
-      if (!nombreRep) return null
       const nombre = String(nombreRep).trim().toLowerCase()
       return todasRepresentaciones.find(
         (r) => (r.fantasia || r.nombre || '').toLowerCase() === nombre
@@ -161,65 +235,76 @@ const importarExcel = async (req, res) => {
     for (let i = 0; i < filas.length; i++) {
       const fila = filas[i]
       const nroFila = i + 2
+      const erroresFila = []
+
+      // ── Validación campo por campo ──────────────────────────────
+      const nombre = String(fila.nombre || '').trim()
+      if (!nombre) erroresFila.push("el campo 'nombre' es requerido")
+
+      const rubro = String(fila.rubro || '').trim()
+      if (!rubro) erroresFila.push("el campo 'rubro' es requerido")
+
+      const costo = parseNumero(fila.costo, 'costo', erroresFila, { opcional: true, porDefecto: 0 })
+      const moneda = parseEnumTexto(fila.moneda, 'moneda', MONEDAS_VALIDAS, erroresFila, 'pesos')
+      const porcentajeIva = parseEnumNumerico(fila.iva, 'iva', IVA_VALIDOS, erroresFila, 21)
+      const TIPO_PRECIO_VALIDOS = ['neto', 'neto_mas_iva']
+      const tipoPrecio = parseEnumTexto(
+        fila.tipo_precio, 'tipo_precio', TIPO_PRECIO_VALIDOS, erroresFila, 'neto_mas_iva'
+      )
+      const stockeable = parseBool(fila.stockeable, 'stockeable', erroresFila, true)
+      const aceptaStockNegativo = parseBool(fila.stock_negativo, 'stock_negativo', erroresFila, true)
+      const cantidadDisponible = parseNumero(
+        fila.cantidad, 'cantidad', erroresFila,
+        { permitirNegativo: aceptaStockNegativo === true, opcional: true, porDefecto: 0 }
+      )
+      const habilitadoTexto = String(fila.habilitado ?? '').trim()
+      const habilitado = habilitadoTexto === ''
+        ? true
+        : parseBool(fila.habilitado, 'habilitado', erroresFila, true)
+
+      // Si hay errores de validación, rechazar la fila completa — sin fallback silencioso
+      if (erroresFila.length > 0) {
+        resultados.errores.push(`Fila ${nroFila}: ${erroresFila.join('; ')}`)
+        continue
+      }
 
       try {
-        const nombre = String(fila.nombre || '').trim()
-        if (!nombre) {
-          resultados.errores.push(`Fila ${nroFila}: el campo 'nombre' es requerido`)
-          continue
-        }
-
-        // Resolver marca
+        // Resolver marca (crea si no existe — esto no es un campo "inválido", es libre)
         let marcaId = null
         if (fila.marca) {
           const nombreMarca = String(fila.marca).trim()
           let marca = await Marca.findOne({ nombre: new RegExp(`^${nombreMarca}$`, 'i') })
-          if (!marca) {
-            marca = await Marca.create({ nombre: nombreMarca, creadoPor: req.user._id })
-          }
+          if (!marca) marca = await Marca.create({ nombre: nombreMarca, creadoPor: req.user._id })
           marcaId = marca._id
         }
 
-        // Resolver representaciones — puede ser una o varias separadas por coma
+        // Resolver representaciones — acá sí avisamos pero no bloqueamos la fila completa
         let representacionIds = []
         if (fila.representaciones) {
-          const nombres = String(fila.representaciones).split(',').map((s) => s.trim())
-          representacionIds = nombres
-            .map(resolverRepresentacion)
-            .filter(Boolean)
-
-          // Avisar si alguna representación no se encontró
-          nombres.forEach((nombre) => {
-            if (nombre && !resolverRepresentacion(nombre)) {
-              resultados.errores.push(
-                `Fila ${nroFila}: representación "${nombre}" no encontrada — se ignoró`
-              )
-            }
+          const nombres = String(fila.representaciones).split(',').map((s) => s.trim()).filter(Boolean)
+          nombres.forEach((nombreRep) => {
+            const id = resolverRepresentacion(nombreRep)
+            if (id) representacionIds.push(id)
+            else resultados.errores.push(`Fila ${nroFila}: representación "${nombreRep}" no encontrada — se ignoró`)
           })
         }
-
-        const boolVal = (v) => String(v).toLowerCase().trim() === 'si'
-        const numVal = (v, def = 0) => isNaN(Number(v)) ? def : Number(v)
 
         const datos = {
           nombre,
           codigo: String(fila.codigo || '').trim() || undefined,
           codigoBarra: String(fila.codigo_barra || '').trim() || undefined,
           descripcion: String(fila.descripcion || '').trim() || undefined,
-          rubro: String(fila.rubro || '').trim() || undefined,
+          rubro,
           subRubro: String(fila.sub_rubro || '').trim() || undefined,
           unidadMedida: String(fila.unidad_medida || '').trim() || undefined,
-          costo: numVal(fila.costo, 0),
-          moneda: ['dolar', 'pesos'].includes(String(fila.moneda).toLowerCase())
-            ? String(fila.moneda).toLowerCase()
-            : 'pesos',
-          porcentajeIva: [0, 10.5, 21, 27].includes(numVal(fila.iva))
-            ? numVal(fila.iva)
-            : 21,
-          stockeable: boolVal(fila.stockeable),
-          aceptaStockNegativo: boolVal(fila.stock_negativo),
-          cantidadDisponible: numVal(fila.cantidad, 0),
-          habilitado: fila.habilitado === '' ? true : boolVal(fila.habilitado),
+          costo,
+          tipoPrecio,
+          moneda,
+          porcentajeIva,
+          stockeable,
+          aceptaStockNegativo,
+          cantidadDisponible,
+          habilitado,
           disponiblePara: ['ventas'],
           representaciones: representacionIds,
           creadoPor: req.user._id,
@@ -232,7 +317,7 @@ const importarExcel = async (req, res) => {
 
         const existente = await Producto.findOne(filtro)
         if (existente) {
-          await Producto.findByIdAndUpdate(existente._id, datos)
+          await Producto.findByIdAndUpdate(existente._id, datos, { runValidators: true })
           resultados.actualizados++
         } else {
           await Producto.create(datos)
@@ -243,11 +328,45 @@ const importarExcel = async (req, res) => {
       }
     }
 
-    res.json({
-      success: true,
-      message: `Importación completada: ${resultados.creados} creados, ${resultados.actualizados} actualizados${resultados.errores.length > 0 ? `, ${resultados.errores.length} advertencias` : ''}`,
-      resultados,
-    })
+    const huboExito = resultados.creados > 0 || resultados.actualizados > 0
+
+// Guardar registro de auditoría de esta importación
+const registro = await ImportacionExcel.create({
+  usuario: req.user._id,
+  nombreArchivo: req.file.originalname,
+  totalFilas: filas.length,
+  creados: resultados.creados,
+  actualizados: resultados.actualizados,
+  erroresCount: resultados.errores.length,
+  errores: resultados.errores,
+})
+
+res.json({
+  success: true,
+  message: huboExito
+    ? `Importación completada: ${resultados.creados} creados, ${resultados.actualizados} actualizados${resultados.errores.length > 0 ? `, ${resultados.errores.length} filas con errores` : ''}`
+    : `No se importó ningún producto. ${resultados.errores.length} filas con errores.`,
+  resultados,
+  registroId: registro._id,
+})
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message })
+  }
+}
+
+// GET /api/productos/importaciones — historial de importaciones de Excel
+const getImportaciones = async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query
+
+    const importaciones = await ImportacionExcel.find()
+      .populate('usuario', 'nombre email')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(Number(limit))
+
+    const total = await ImportacionExcel.countDocuments()
+    res.json({ success: true, total, page: Number(page), importaciones })
   } catch (error) {
     res.status(500).json({ success: false, message: error.message })
   }
@@ -258,34 +377,82 @@ const descargarPlantilla = async (req, res) => {
   try {
     const columnas = [
       'codigo', 'codigo_barra', 'nombre', 'descripcion', 'marca',
-      'rubro', 'sub_rubro', 'unidad_medida', 'costo', 'moneda',
-      'iva', 'stockeable', 'stock_negativo', 'cantidad', 'habilitado',
-      'representaciones',
+      'rubro', 'sub_rubro', 'unidad_medida', 'costo', 'tipo_precio',
+      'moneda', 'iva', 'stockeable', 'stock_negativo', 'cantidad',
+      'habilitado', 'representaciones',
     ]
 
-    const ejemplo = [{
-      codigo: 'PROD-001',
-      codigo_barra: '7790001234567',
-      nombre: 'Producto ejemplo',
-      descripcion: 'Descripción del producto',
-      marca: 'Coca Cola',
-      rubro: 'Bebidas',
-      sub_rubro: 'Gaseosas',
-      unidad_medida: 'unidad',
-      costo: 100,
-      moneda: 'pesos',
-      iva: 21,
-      stockeable: 'si',
-      stock_negativo: 'no',
-      cantidad: 50,
-      habilitado: 'si',
-      representaciones: 'Coca Cola, Pepsi',  // separadas por coma
-    }]
+    const ejemplo = [
+      {
+        codigo: 'PROD-001',
+        codigo_barra: '7790001234567',
+        nombre: 'Producto ejemplo (precio con IVA)',
+        descripcion: 'Descripción del producto',
+        marca: 'Coca Cola',
+        rubro: 'Bebidas',
+        sub_rubro: 'Gaseosas',
+        unidad_medida: 'unidad',
+        costo: 121,
+        tipo_precio: 'neto_mas_iva',
+        moneda: 'pesos',
+        iva: 21,
+        stockeable: 'si',
+        stock_negativo: 'no',
+        cantidad: 50,
+        habilitado: 'si',
+        representaciones: 'Coca Cola, Pepsi',
+      },
+      {
+        codigo: 'PROD-002',
+        codigo_barra: '7790007654321',
+        nombre: 'Producto ejemplo (precio neto)',
+        descripcion: 'Este precio NO incluye IVA, se calcula solo',
+        marca: 'Pepsi',
+        rubro: 'Bebidas',
+        sub_rubro: 'Gaseosas',
+        unidad_medida: 'caja',
+        costo: 100,
+        tipo_precio: 'neto',
+        moneda: 'pesos',
+        iva: 21,
+        stockeable: 'no',
+        stock_negativo: 'no',
+        cantidad: 0,
+        habilitado: 'si',
+        representaciones: 'Pepsi',
+      },
+    ]
+
+    const instrucciones = [
+      { campo: 'nombre',           obligatorio: 'Sí', valores_permitidos: 'Texto libre', notas: '' },
+      { campo: 'rubro',            obligatorio: 'Sí', valores_permitidos: 'Texto libre', notas: '' },
+      { campo: 'codigo',           obligatorio: 'No', valores_permitidos: 'Texto libre', notas: 'Si se repite, actualiza el producto existente' },
+      { campo: 'codigo_barra',     obligatorio: 'No', valores_permitidos: 'Texto libre', notas: '' },
+      { campo: 'descripcion',      obligatorio: 'No', valores_permitidos: 'Texto libre', notas: '' },
+      { campo: 'marca',            obligatorio: 'No', valores_permitidos: 'Texto libre', notas: 'Se crea automáticamente si no existe' },
+      { campo: 'sub_rubro',        obligatorio: 'No', valores_permitidos: 'Texto libre', notas: '' },
+      { campo: 'unidad_medida',    obligatorio: 'No', valores_permitidos: 'Texto libre', notas: 'Ej: unidad, caja, kg' },
+      { campo: 'costo',            obligatorio: 'No', valores_permitidos: 'Número ≥ 0', notas: 'Default: 0' },
+      { campo: 'tipo_precio',      obligatorio: 'No', valores_permitidos: 'neto | neto_mas_iva', notas: 'Default: neto_mas_iva. Si es "neto" se le suma el IVA automáticamente' },
+      { campo: 'moneda',           obligatorio: 'No', valores_permitidos: 'pesos | dolar', notas: 'Default: pesos' },
+      { campo: 'iva',              obligatorio: 'No', valores_permitidos: '0 | 10.5 | 21 | 27', notas: 'Default: 21. Cualquier otro valor RECHAZA la fila' },
+      { campo: 'stockeable',       obligatorio: 'No', valores_permitidos: 'si | no', notas: 'Default: no' },
+      { campo: 'stock_negativo',   obligatorio: 'No', valores_permitidos: 'si | no', notas: 'Default: no' },
+      { campo: 'cantidad',         obligatorio: 'No', valores_permitidos: 'Número', notas: 'Negativo solo si stock_negativo = si' },
+      { campo: 'habilitado',       obligatorio: 'No', valores_permitidos: 'si | no', notas: 'Default: si' },
+      { campo: 'representaciones', obligatorio: 'No', valores_permitidos: 'Nombres separados por coma', notas: 'Deben existir previamente en el sistema' },
+    ]
 
     const wb = XLSX.utils.book_new()
-    const ws = XLSX.utils.json_to_sheet(ejemplo, { header: columnas })
-    ws['!cols'] = columnas.map(() => ({ wch: 20 }))
-    XLSX.utils.book_append_sheet(wb, ws, 'Productos')
+
+    const wsProductos = XLSX.utils.json_to_sheet(ejemplo, { header: columnas })
+    wsProductos['!cols'] = columnas.map(() => ({ wch: 22 }))
+    XLSX.utils.book_append_sheet(wb, wsProductos, 'Productos')
+
+    const wsInstrucciones = XLSX.utils.json_to_sheet(instrucciones)
+    wsInstrucciones['!cols'] = [{ wch: 18 }, { wch: 12 }, { wch: 28 }, { wch: 50 }]
+    XLSX.utils.book_append_sheet(wb, wsInstrucciones, 'Instrucciones')
+
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
 
     res.setHeader('Content-Disposition', 'attachment; filename=plantilla_productos.xlsx')
@@ -298,5 +465,5 @@ const descargarPlantilla = async (req, res) => {
 
 module.exports = {
   getProductos, getProducto, crearProducto, editarProducto,
-  toggleHabilitado, eliminarProducto, importarExcel, descargarPlantilla,
+  toggleHabilitado, eliminarProducto, importarExcel, descargarPlantilla, getImportaciones,
 }

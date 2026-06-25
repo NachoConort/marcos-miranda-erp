@@ -16,4 +16,6 @@ export const productosService = {
   },
   descargarPlantilla: () =>
     api.get('/productos/plantilla-excel', { responseType: 'blob' }).then((r) => r.data),
+  getImportaciones: (params) =>
+    api.get('/productos/importaciones', { params }).then((r) => r.data),
 }

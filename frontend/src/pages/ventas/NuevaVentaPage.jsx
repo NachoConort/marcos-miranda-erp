@@ -146,7 +146,7 @@ export default function NuevaVentaPage() {
     const producto = productos.find((p) => p._id === productoId);
     if (producto) {
       setValue(`items.${index}.descripcion`, producto.nombre);
-      setValue(`items.${index}.precioUnitario`, producto.costo);
+      setValue(`items.${index}.precioUnitario`, producto.precioFinal);
       setValue(`items.${index}.codigo`, producto.codigo || "");
       setValue(`items.${index}.unidad`, producto.unidadMedida || "");
       setValue(`items.${index}.productoLabel`, producto.nombre);
