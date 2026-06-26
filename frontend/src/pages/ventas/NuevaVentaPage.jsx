@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { ventasService } from "@/services/ventas.service";
 import { useFormData } from "@/hooks/useFormData";
 import SearchSelect from "@/components/shared/SearchSelect";
+import FilaItemProducto from "@/components/shared/FilaItemProducto";
 import ResumenImpositivo from "@/components/shared/ResumenImpositivo";
 import api from "@/services/api";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
@@ -43,7 +44,12 @@ export default function NuevaVentaPage() {
         { descripcion: "", cantidad: "", precioUnitario: "", descuento: "" },
       ],
       descuentoGlobal: 0,
-      comprobante: { tipo: "factura", numero: "", fechaEmision: "" },
+      comprobante: {
+        tipo: "factura",
+        puntoVenta: "",
+        numero: "",
+        fechaEmision: "",
+      },
       cobranzas: [],
       condicionPago: "",
       estadoRemito: "sin_remito",
@@ -65,9 +71,11 @@ export default function NuevaVentaPage() {
   const descuentoGlobal = watch("descuentoGlobal");
   const cobranzas = watch("cobranzas");
 
-  // Serializar items para detectar cambios
   const itemsSerializados = JSON.stringify(
     items.map((i) => ({ p: i.precioUnitario, c: i.cantidad, d: i.descuento })),
+  );
+  const cobranzasSerializadas = JSON.stringify(
+    cobranzas.map((c) => ({ m: c.monto, co: c.cotizacion })),
   );
 
   useEffect(() => {
@@ -90,11 +98,8 @@ export default function NuevaVentaPage() {
       0,
     );
     setTotalCobranza(total);
-  }, [
-    JSON.stringify(cobranzas.map((c) => ({ m: c.monto, co: c.cotizacion }))),
-  ]);
+  }, [cobranzasSerializadas]);
 
-  // Cargar datos del pedido origen
   const { data: pedidoData } = useQuery({
     queryKey: ["pedido", pedidoOrigenId],
     queryFn: () => api.get(`/pedidos/${pedidoOrigenId}`).then((r) => r.data),
@@ -104,7 +109,6 @@ export default function NuevaVentaPage() {
   useEffect(() => {
     if (!pedidoData?.pedido) return;
     const pedido = pedidoData.pedido;
-
     setRepresentacionId(pedido.representacion?._id || pedido.representacion);
     setClienteId(pedido.cliente?._id || pedido.cliente);
     setVendedorId(pedido.vendedor?._id || pedido.vendedor);
@@ -116,11 +120,13 @@ export default function NuevaVentaPage() {
       descuento: item.descuento || "",
       codigo: item.codigo || "",
       unidad: item.unidad || "",
-      // Usar el productoId guardado al crear el pedido
       productoSeleccionadoId: item.productoId || "",
+      productoLabel: item.descripcion,
+      productoId: item.productoId || "",
+      porcentajeIva: item.porcentajeIva ?? 21,
     }));
-    setValue("items", itemsPedido);
 
+    setValue("items", itemsPedido);
     setValue("descuentoGlobal", pedido.descuentoGlobal || 0);
     if (pedido.notas) setValue("notas", pedido.notas);
   }, [pedidoData]);
@@ -136,7 +142,6 @@ export default function NuevaVentaPage() {
       setValue(`items.${index}.codigo`, itemLista.codigo || "");
       setValue(`items.${index}.unidad`, itemLista.unidad || "");
       setValue(`items.${index}.productoLabel`, itemLista.descripcion);
-      // Buscar el IVA del producto en el catálogo
       const prod = productos.find(
         (p) => p._id === productoId || p.codigo === itemLista.codigo,
       );
@@ -150,7 +155,7 @@ export default function NuevaVentaPage() {
       setValue(`items.${index}.codigo`, producto.codigo || "");
       setValue(`items.${index}.unidad`, producto.unidadMedida || "");
       setValue(`items.${index}.productoLabel`, producto.nombre);
-      setValue(`items.${index}.porcentajeIva`, producto.porcentajeIva ?? 21); // ← guardar IVA
+      setValue(`items.${index}.porcentajeIva`, producto.porcentajeIva ?? 21);
     }
   };
 
@@ -190,7 +195,6 @@ export default function NuevaVentaPage() {
     });
   };
 
-  // Opciones para SearchSelect
   const opRepresentaciones = representaciones.map((r) => ({
     value: r._id,
     label: r.fantasia || r.nombre,
@@ -215,17 +219,17 @@ export default function NuevaVentaPage() {
   const saldoPendiente = totales.total - totalCobranza;
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center gap-3 mb-6">
+    <div className="p-4 max-w-5xl mx-auto">
+      <div className="flex items-center gap-2 mb-4">
         <button
           onClick={() => navigate(pedidoOrigenId ? "/pedidos" : "/ventas")}
           className="text-gray-400 hover:text-gray-600"
         >
-          <ArrowLeft size={20} />
+          <ArrowLeft size={18} />
         </button>
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Nueva venta</h2>
-          <p className="text-sm text-gray-500">
+          <h2 className="text-lg font-semibold text-gray-900">Nueva venta</h2>
+          <p className="text-xs text-gray-500">
             {pedidoOrigenId
               ? `Confirmando pedido #${pedidoData?.pedido?.numero ?? "..."}`
               : "Registrá los datos del comprobante recibido"}
@@ -233,113 +237,97 @@ export default function NuevaVentaPage() {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
         {/* Datos generales */}
-        <div className="card">
-          <h3 className="text-sm font-medium text-gray-700 mb-4">
+        <div className="card-compact">
+          <h3 className="text-xs font-medium text-gray-700 mb-2.5 uppercase tracking-wide">
             Datos generales
           </h3>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-3 gap-2.5">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Representación *
-              </label>
+              <label className="label-sm">Representación *</label>
               <SearchSelect
                 options={opRepresentaciones}
                 value={representacionId}
                 onChange={setRepresentacionId}
-                placeholder="Buscar representación..."
+                placeholder="Buscar..."
                 loading={loading}
                 disabled={!!pedidoOrigenId}
+                size="sm"
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Cliente *
-              </label>
+              <label className="label-sm">Cliente *</label>
               <SearchSelect
                 options={opClientes}
                 value={clienteId}
                 onChange={setClienteId}
-                placeholder="Buscar cliente..."
+                placeholder="Buscar..."
                 loading={loading}
                 disabled={!!pedidoOrigenId}
+                size="sm"
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Vendedor *
-              </label>
+              <label className="label-sm">Vendedor *</label>
               <SearchSelect
                 options={opVendedores}
                 value={vendedorId}
                 onChange={setVendedorId}
-                placeholder="Buscar vendedor..."
+                placeholder="Buscar..."
                 loading={loading}
                 disabled={!!pedidoOrigenId}
+                size="sm"
               />
             </div>
           </div>
         </div>
 
-        {/* Condición de pago — incluye comprobante */}
-        <div className="card">
-          <h3 className="text-sm font-medium text-gray-700 mb-4">
+        {/* Condición de pago (incluye comprobante) */}
+        <div className="card-compact">
+          <h3 className="text-xs font-medium text-gray-700 mb-2.5 uppercase tracking-wide">
             Condición de pago
           </h3>
-          <div className="grid grid-cols-3 gap-4">
-            {/* Comprobante */}
+          <div className="grid grid-cols-4 gap-2.5">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Tipo comprobante *
-              </label>
+              <label className="label-sm">Tipo comprobante *</label>
               <select
                 {...register("comprobante.tipo", { required: true })}
-                className="input"
+                className="input-sm"
               >
                 <option value="factura">Factura</option>
                 <option value="comprobante">Comprobante</option>
               </select>
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Punto de venta *
-              </label>
+              <label className="label-sm">Punto de venta *</label>
               <input
                 type="number"
                 {...register("comprobante.puntoVenta", { required: true })}
                 placeholder="0001"
-                className="input"
+                className="input-sm"
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Número *
-              </label>
+              <label className="label-sm">Número *</label>
               <input
                 type="number"
                 {...register("comprobante.numero", { required: true })}
                 placeholder="00000001"
-                className="input"
+                className="input-sm"
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Fecha emisión *
-              </label>
+              <label className="label-sm">Fecha emisión *</label>
               <input
                 type="date"
                 {...register("comprobante.fechaEmision", { required: true })}
-                className="input"
+                className="input-sm"
               />
             </div>
-
-            {/* Condición y cobrador */}
             <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Condición de pago
-              </label>
-              <select {...register("condicionPago")} className="input">
+              <label className="label-sm">Condición de pago</label>
+              <select {...register("condicionPago")} className="input-sm">
                 <option value="">Sin especificar</option>
                 <option value="contado">Contado</option>
                 <option value="15_dias">15 días</option>
@@ -349,66 +337,35 @@ export default function NuevaVentaPage() {
               </select>
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Cobrador
-              </label>
+              <label className="label-sm">Cobrador</label>
               <input
                 {...register("cobrador.nombre")}
-                placeholder="Nombre del cobrador"
-                className="input"
+                placeholder="Nombre"
+                className="input-sm"
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Tel. cobrador
-              </label>
+              <label className="label-sm">Tel. cobrador</label>
               <input
                 {...register("cobrador.telefono")}
                 placeholder="381 000-0000"
-                className="input"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Logística */}
-        <div className="card">
-          <h3 className="text-sm font-medium text-gray-700 mb-4">Logística</h3>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Estado remito
-              </label>
-              <select {...register("estadoRemito")} className="input">
-                <option value="sin_remito">Sin remito</option>
-                <option value="pendiente">Pendiente</option>
-                <option value="entregado">Entregado</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Notas</label>
-              <textarea
-                {...register("notas")}
-                rows={2}
-                className="input resize-none"
+                className="input-sm"
               />
             </div>
           </div>
         </div>
 
         {/* Items */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-medium text-gray-700">Productos</h3>
+        <div className="card-compact">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-medium text-gray-700 uppercase tracking-wide">
+              Productos{" "}
               {representacionId && opcionesProductos.length > 0 && (
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {listaPrecios.length > 0
-                    ? "Usando lista de precios"
-                    : "Usando catálogo de productos"}
-                </p>
+                <span className="text-gray-400 font-normal">
+                  · {listaPrecios.length > 0 ? "lista de precios" : "catálogo"}
+                </span>
               )}
-            </div>
+            </h3>
             <button
               type="button"
               onClick={() =>
@@ -421,136 +378,69 @@ export default function NuevaVentaPage() {
               }
               className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
             >
-              <Plus size={13} /> Agregar ítem
+              <Plus size={12} /> Agregar
             </button>
           </div>
 
-          <div className="space-y-3">
-            <div className="grid grid-cols-12 gap-2 text-xs text-gray-400 px-1">
-              <span className="col-span-4">Producto</span>
-              <span className="col-span-2">Precio unit.</span>
-              <span className="col-span-2">Cantidad</span>
-              <span className="col-span-1">Desc %</span>
-              <span className="col-span-2 text-right">Subtotal</span>
-              <span className="col-span-1" />
+          <div className="grid grid-cols-12 gap-3">
+            {/* Columna izquierda: lista de productos con scroll si crece mucho */}
+            <div className="col-span-8">
+              <div className="grid grid-cols-12 gap-1.5 text-[10px] text-gray-400 px-0.5 mb-1 uppercase">
+                <span className="col-span-5">Producto</span>
+                <span className="col-span-2">Cant.</span>
+                <span className="col-span-2">P. unit (c/IVA)</span>
+                <span className="col-span-2">Desc%</span>
+                <span className="col-span-1" />
+              </div>
+              <div className="max-h-96 overflow-y-auto pr-1">
+                {itemFields.map((field, index) => (
+                  <FilaItemProducto
+                    key={field.id}
+                    item={items[index]}
+                    index={index}
+                    opciones={opProductos}
+                    onSeleccionarProducto={autocompletarItem}
+                    register={register}
+                    disabled={!representacionId}
+                    onRemove={() => removeItem(index)}
+                    mostrarRemove={itemFields.length > 1}
+                  />
+                ))}
+              </div>
             </div>
 
-            {itemFields.map((field, index) => {
-              const precio = Number(items[index]?.precioUnitario) || 0;
-              const cant = Number(items[index]?.cantidad) || 0;
-              const desc = Math.min(Number(items[index]?.descuento) || 0, 100);
-              const subtotal = precio * cant;
-              const subtotalConDesc = subtotal * (1 - desc / 100);
-              const descuentoMonto = subtotal - subtotalConDesc;
-
-              return (
-                <div
-                  key={field.id}
-                  className="grid grid-cols-12 gap-2 items-center"
-                >
-                  <div className="col-span-4">
-                    {opProductos.length > 0 ? (
-                      <SearchSelect
-                        options={opProductos}
-                        value={items[index]?.productoSeleccionadoId || ""}
-                        onChange={(id) => autocompletarItem(index, id)}
-                        placeholder="Buscar producto..."
-                        disabled={!representacionId}
-                      />
-                    ) : (
-                      <input
-                        {...register(`items.${index}.descripcion`, {
-                          required: true,
-                        })}
-                        placeholder="Descripción"
-                        className="input"
-                      />
-                    )}
-                  </div>
-                  <div className="col-span-2">
+            {/* Columna derecha: totales SIEMPRE fijos, no se mueven con la lista */}
+            <div className="col-span-4">
+              <div className="sticky top-0">
+                <div className="flex items-center justify-between gap-1.5 text-xs text-gray-500 mb-2">
+                  <span>Desc. global</span>
+                  <div className="flex items-center gap-1">
                     <input
                       type="number"
-                      {...register(`items.${index}.precioUnitario`)}
-                      placeholder="0.00"
-                      className="input"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <input
-                      type="number"
-                      {...register(`items.${index}.cantidad`)}
-                      placeholder="0"
-                      className="input"
-                    />
-                  </div>
-                  <div className="col-span-1">
-                    <input
-                      type="number"
+                      min="0"
                       max="100"
-                      {...register(`items.${index}.descuento`)}
-                      placeholder="0"
-                      className="input"
+                      {...register("descuentoGlobal", { valueAsNumber: true })}
+                      className="w-12 border border-gray-200 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
-                  </div>
-                  <div className="col-span-2 text-right">
-                    <p className="text-sm font-medium text-gray-700">
-                      {formatMoney(subtotalConDesc)}
-                    </p>
-                    {descuentoMonto > 0 && (
-                      <p className="text-xs text-red-400">
-                        - {formatMoney(descuentoMonto)}
-                      </p>
-                    )}
-                  </div>
-                  <div className="col-span-1 flex justify-center">
-                    {itemFields.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeItem(index)}
-                        className="text-red-400 hover:text-red-600"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
+                    <span>%</span>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-
-          {/* Totales */}
-          <div className="flex justify-end pt-4 border-t border-gray-100 mt-4">
-            <div className="w-80">
-              <div className="flex items-center justify-between text-sm text-gray-500 mb-3">
-                <div className="flex items-center gap-2">
-                  <span>Descuento global</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    {...register("descuentoGlobal", { valueAsNumber: true })}
-                    className="w-14 border border-gray-200 rounded px-1.5 py-0.5 text-xs text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                  <span>%</span>
-                </div>
+                <ResumenImpositivo
+                  items={items}
+                  descuentoGlobal={descuentoGlobal}
+                  compact
+                />
               </div>
-              <ResumenImpositivo
-                items={items}
-                descuentoGlobal={descuentoGlobal}
-              />
             </div>
           </div>
         </div>
 
         {/* Cobranza */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-medium text-gray-700">Cobranza</h3>
-              <p className="text-xs text-gray-400 mt-0.5">
-                Podés agregar múltiples pagos
-              </p>
-            </div>
+        <div className="card-compact">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-medium text-gray-700 uppercase tracking-wide">
+              Cobranza
+            </h3>
             <button
               type="button"
               onClick={() =>
@@ -566,16 +456,16 @@ export default function NuevaVentaPage() {
               }
               className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
             >
-              <Plus size={13} /> Agregar pago
+              <Plus size={12} /> Agregar pago
             </button>
           </div>
 
           {cobranzaFields.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-4">
+            <p className="text-xs text-gray-400 text-center py-3">
               Sin pagos — la venta quedará pendiente de cobro
             </p>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {cobranzaFields.map((field, index) => {
                 const moneda = watch(`cobranzas.${index}.moneda`);
                 const monto = Number(watch(`cobranzas.${index}.monto`)) || 0;
@@ -586,112 +476,75 @@ export default function NuevaVentaPage() {
                 return (
                   <div
                     key={field.id}
-                    className="border border-gray-100 rounded-lg p-3 bg-gray-50/50"
+                    className="border border-gray-100 rounded-md p-2.5 bg-gray-50/50"
                   >
-                    <div className="grid grid-cols-4 gap-3 mb-3">
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">
-                          Caja *
-                        </label>
-                        <input
-                          {...register(`cobranzas.${index}.caja`, {
-                            required: true,
-                          })}
-                          placeholder="Ej: Caja principal"
-                          className="input"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">
-                          Fecha *
-                        </label>
-                        <input
-                          type="date"
-                          {...register(`cobranzas.${index}.fechaMovimiento`, {
-                            required: true,
-                          })}
-                          className="input"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">
-                          Tipo de valor *
-                        </label>
-                        <select
-                          {...register(`cobranzas.${index}.tipoValor`, {
-                            required: true,
-                          })}
-                          className="input"
-                        >
-                          <option value="efectivo">Efectivo</option>
-                          <option value="cheque">Cheque</option>
-                          <option value="transferencia">Transferencia</option>
-                          <option value="tarjeta">Tarjeta</option>
-                          <option value="otros">Otros</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">
-                          Referencia
-                        </label>
-                        <input
-                          {...register(`cobranzas.${index}.referencia`)}
-                          placeholder="Nº cheque, transf..."
-                          className="input"
-                        />
-                      </div>
+                    <div className="grid grid-cols-5 gap-2 mb-2">
+                      <input
+                        {...register(`cobranzas.${index}.caja`, {
+                          required: true,
+                        })}
+                        placeholder="Caja"
+                        className="input-sm"
+                      />
+                      <input
+                        type="date"
+                        {...register(`cobranzas.${index}.fechaMovimiento`, {
+                          required: true,
+                        })}
+                        className="input-sm"
+                      />
+                      <select
+                        {...register(`cobranzas.${index}.tipoValor`, {
+                          required: true,
+                        })}
+                        className="input-sm"
+                      >
+                        <option value="efectivo">Efectivo</option>
+                        <option value="cheque">Cheque</option>
+                        <option value="transferencia">Transferencia</option>
+                        <option value="tarjeta">Tarjeta</option>
+                        <option value="otros">Otros</option>
+                      </select>
+                      <input
+                        {...register(`cobranzas.${index}.referencia`)}
+                        placeholder="Referencia"
+                        className="input-sm"
+                      />
+                      <select
+                        {...register(`cobranzas.${index}.moneda`)}
+                        className="input-sm"
+                      >
+                        <option value="pesos">Pesos ($)</option>
+                        <option value="dolar">Dólar (USD)</option>
+                      </select>
                     </div>
-                    <div className="grid grid-cols-4 gap-3 items-end">
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">
-                          Moneda *
-                        </label>
-                        <select
-                          {...register(`cobranzas.${index}.moneda`)}
-                          className="input"
-                        >
-                          <option value="pesos">Pesos ($)</option>
-                          <option value="dolar">Dólar (USD)</option>
-                        </select>
-                      </div>
+                    <div className="grid grid-cols-4 gap-2 items-center">
                       {moneda === "dolar" && (
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-1">
-                            Cotización
-                          </label>
-                          <input
-                            type="number"
-                            {...register(`cobranzas.${index}.cotizacion`)}
-                            className="input"
-                          />
-                        </div>
-                      )}
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">
-                          Monto *
-                        </label>
                         <input
                           type="number"
-                          {...register(`cobranzas.${index}.monto`, {
-                            required: true,
-                          })}
-                          placeholder="0"
-                          className="input"
+                          {...register(`cobranzas.${index}.cotizacion`)}
+                          placeholder="Cotización"
+                          className="input-sm"
                         />
-                      </div>
-                      <div className="flex items-end justify-between">
-                        <div>
-                          <p className="text-xs text-gray-400">Total en $</p>
-                          <p className="text-sm font-semibold text-gray-800">
-                            {formatMoney(totalPago)}
-                          </p>
-                        </div>
+                      )}
+                      <input
+                        type="number"
+                        {...register(`cobranzas.${index}.monto`, {
+                          required: true,
+                        })}
+                        placeholder="Monto"
+                        className="input-sm"
+                      />
+                      <div className="flex items-center justify-between col-span-2">
+                        <p className="text-xs font-semibold text-gray-700">
+                          {formatMoney(totalPago)}
+                        </p>
                         <button
                           type="button"
                           onClick={() => removeCobranza(index)}
-                          className="text-red-400 hover:text-red-600 mb-1"
+                          className="text-red-400 hover:text-red-600"
                         >
-                          <Trash2 size={15} />
+                          <Trash2 size={13} />
                         </button>
                       </div>
                     </div>
@@ -699,21 +552,20 @@ export default function NuevaVentaPage() {
                 );
               })}
 
-              {/* Resumen */}
-              <div className="flex justify-end pt-2">
-                <div className="w-64 space-y-1.5 text-sm">
+              <div className="flex justify-end pt-1">
+                <div className="w-60 space-y-1 text-xs">
                   <div className="flex justify-between text-gray-500">
                     <span>Total venta</span>
                     <span>{formatMoney(totales.total)}</span>
                   </div>
                   <div className="flex justify-between text-gray-500">
-                    <span>Total cobrado</span>
+                    <span>Cobrado</span>
                     <span className="text-green-600">
                       {formatMoney(totalCobranza)}
                     </span>
                   </div>
                   <div
-                    className={`flex justify-between font-semibold border-t border-gray-100 pt-1.5 ${saldoPendiente > 0 ? "text-red-500" : "text-green-600"}`}
+                    className={`flex justify-between font-semibold border-t border-gray-100 pt-1 ${saldoPendiente > 0 ? "text-red-500" : "text-green-600"}`}
                   >
                     <span>Saldo pendiente</span>
                     <span>{formatMoney(Math.max(saldoPendiente, 0))}</span>
@@ -724,15 +576,44 @@ export default function NuevaVentaPage() {
           )}
         </div>
 
-        <div className="flex justify-end gap-3">
+        {/* Logística */}
+        <div className="card-compact">
+          <h3 className="text-xs font-medium text-gray-700 mb-2.5 uppercase tracking-wide">
+            Logística
+          </h3>
+          <div className="grid grid-cols-2 gap-2.5">
+            <div>
+              <label className="label-sm">Estado remito</label>
+              <select {...register("estadoRemito")} className="input-sm">
+                <option value="sin_remito">Sin remito</option>
+                <option value="pendiente">Pendiente</option>
+                <option value="entregado">Entregado</option>
+              </select>
+            </div>
+            <div>
+              <label className="label-sm">Notas</label>
+              <input
+                {...register("notas")}
+                className="input-sm"
+                placeholder="Observaciones..."
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2">
           <button
             type="button"
             onClick={() => navigate(pedidoOrigenId ? "/pedidos" : "/ventas")}
-            className="btn-secondary"
+            className="btn-secondary text-sm"
           >
             Cancelar
           </button>
-          <button type="submit" disabled={isPending} className="btn-primary">
+          <button
+            type="submit"
+            disabled={isPending}
+            className="btn-primary text-sm"
+          >
             {isPending ? "Guardando..." : "Confirmar venta"}
           </button>
         </div>

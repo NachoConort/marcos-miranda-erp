@@ -56,7 +56,7 @@ const getVentas = async (req, res) => {
     const ventas = await Venta.find(filtros)
       .populate('cliente', 'nombre razonSocial cuit')
       .populate('vendedor', 'nombre')
-      .populate('representacion', 'nombre')
+      .populate('representacion', 'fantasia nombre')
       .populate('comision', 'montoComision estado tipo porcentaje')
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)

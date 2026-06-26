@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { pedidosService } from "@/services/pedidos.service";
 import { useFormData } from "@/hooks/useFormData";
 import SearchSelect from "@/components/shared/SearchSelect";
+import FilaItemProducto from "@/components/shared/FilaItemProducto";
 import ResumenImpositivo from "@/components/shared/ResumenImpositivo";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { useQuery, useMutation } from "@tanstack/react-query";
 import api from "@/services/api";
+import { ArrowLeft, Plus } from "lucide-react";
 
 const formatMoney = (n) =>
   new Intl.NumberFormat("es-AR", {
@@ -18,6 +19,9 @@ const formatMoney = (n) =>
 
 export default function NuevoPedidoPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const presupuestoOrigenId = searchParams.get("presupuesto");
+
   const [representacionId, setRepresentacionId] = useState("");
   const [clienteId, setClienteId] = useState("");
   const [vendedorId, setVendedorId] = useState("");
@@ -25,18 +29,7 @@ export default function NuevoPedidoPage() {
     subtotalBruto: 0,
     totalDescuentos: 0,
     subtotalNeto: 0,
-    totalIva: 0,
     total: 0,
-  });
-
-  const [searchParams] = useSearchParams();
-  const presupuestoOrigenId = searchParams.get("presupuesto");
-
-  const { data: presupuestoData } = useQuery({
-    queryKey: ["presupuesto-origen", presupuestoOrigenId],
-    queryFn: () =>
-      api.get(`/presupuestos/${presupuestoOrigenId}`).then((r) => r.data),
-    enabled: !!presupuestoOrigenId,
   });
 
   const {
@@ -64,13 +57,8 @@ export default function NuevoPedidoPage() {
   const descuentoGlobal = watch("descuentoGlobal");
   const tipoFacturacion = watch("tipoFacturacion");
 
-  // Recalcular totales cada vez que cambia cualquier valor
   const itemsSerializados = JSON.stringify(
-    items.map((i) => ({
-      p: i.precioUnitario,
-      c: i.cantidad,
-      d: i.descuento,
-    })),
+    items.map((i) => ({ p: i.precioUnitario, c: i.cantidad, d: i.descuento })),
   );
 
   useEffect(() => {
@@ -88,19 +76,19 @@ export default function NuevoPedidoPage() {
     }, 0);
 
     const descGlobal = Math.min(Number(descuentoGlobal) || 0, 100);
-    const subtotalNeto = subtotalTrasItems * (1 - descGlobal / 100);
-    const totalDescuentos = subtotalBruto - subtotalNeto;
-    const totalIva = 0;
-    const total = subtotalNeto + totalIva;
+    const total = subtotalTrasItems * (1 - descGlobal / 100);
+    const totalDescuentos = subtotalBruto - total;
 
-    setTotales({
-      subtotalBruto,
-      totalDescuentos,
-      subtotalNeto,
-      totalIva,
-      total,
-    });
-  }, [itemsSerializados, descuentoGlobal, tipoFacturacion]);
+    setTotales({ subtotalBruto, totalDescuentos, subtotalNeto: total, total });
+  }, [itemsSerializados, descuentoGlobal]);
+
+  // Cargar presupuesto origen si viene de uno
+  const { data: presupuestoData } = useQuery({
+    queryKey: ["presupuesto-origen", presupuestoOrigenId],
+    queryFn: () =>
+      api.get(`/presupuestos/${presupuestoOrigenId}`).then((r) => r.data),
+    enabled: !!presupuestoOrigenId,
+  });
 
   useEffect(() => {
     if (!presupuestoData?.presupuesto) return;
@@ -118,8 +106,9 @@ export default function NuevoPedidoPage() {
       codigo: item.codigo || "",
       unidad: item.unidad || "",
       productoSeleccionadoId: item.productoId || "",
-      productoLabel: item.descripcion, // ← clave para que SearchSelect lo muestre
+      productoLabel: item.descripcion,
       productoId: item.productoId || "",
+      porcentajeIva: item.porcentajeIva ?? 21,
     }));
 
     setValue("items", itemsPresupuesto);
@@ -138,7 +127,6 @@ export default function NuevoPedidoPage() {
       setValue(`items.${index}.codigo`, itemLista.codigo || "");
       setValue(`items.${index}.unidad`, itemLista.unidad || "");
       setValue(`items.${index}.productoLabel`, itemLista.descripcion);
-      // Buscar el IVA del producto en el catálogo
       const prod = productos.find(
         (p) => p._id === productoId || p.codigo === itemLista.codigo,
       );
@@ -152,7 +140,7 @@ export default function NuevoPedidoPage() {
       setValue(`items.${index}.codigo`, producto.codigo || "");
       setValue(`items.${index}.unidad`, producto.unidadMedida || "");
       setValue(`items.${index}.productoLabel`, producto.nombre);
-      setValue(`items.${index}.porcentajeIva`, producto.porcentajeIva ?? 21); // ← guardar IVA
+      setValue(`items.${index}.porcentajeIva`, producto.porcentajeIva ?? 21);
     }
   };
 
@@ -189,25 +177,21 @@ export default function NuevoPedidoPage() {
     });
   };
 
-  // Opciones para SearchSelect
   const opRepresentaciones = representaciones.map((r) => ({
     value: r._id,
     label: r.fantasia || r.nombre,
     sublabel: r.razonSocial,
   }));
-
   const opClientes = clientes.map((c) => ({
     value: c._id,
     label: c.fantasia || c.razonSocial,
     sublabel: c.cuit,
   }));
-
   const opVendedores = vendedores.map((v) => ({
     value: v._id,
     label: v.nombre,
     sublabel: v.email,
   }));
-
   const opProductos = opcionesProductos.map((p) => ({
     value: p._id,
     label: p.descripcion || p.nombre,
@@ -215,81 +199,74 @@ export default function NuevoPedidoPage() {
   }));
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="flex items-center gap-3 mb-6">
+    <div className="p-4 max-w-5xl mx-auto">
+      <div className="flex items-center gap-2 mb-4">
         <button
           onClick={() => navigate("/pedidos")}
           className="text-gray-400 hover:text-gray-600"
         >
-          <ArrowLeft size={20} />
+          <ArrowLeft size={18} />
         </button>
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Nuevo pedido</h2>
-          <p className="text-sm text-gray-500">
+          <h2 className="text-lg font-semibold text-gray-900">Nuevo pedido</h2>
+          <p className="text-xs text-gray-500">
             Se enviará a la representación para su confirmación
           </p>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
         {/* Datos generales */}
-        <div className="card">
-          <h3 className="text-sm font-medium text-gray-700 mb-4">
+        <div className="card-compact">
+          <h3 className="text-xs font-medium text-gray-700 mb-2.5 uppercase tracking-wide">
             Datos generales
           </h3>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Representación *
-              </label>
+          <div className="grid grid-cols-6 gap-2.5">
+            <div className="col-span-2">
+              <label className="label-sm">Representación *</label>
               <SearchSelect
                 options={opRepresentaciones}
                 value={representacionId}
                 onChange={setRepresentacionId}
-                placeholder="Buscar representación..."
+                placeholder="Buscar..."
                 loading={loading}
+                size="sm"
               />
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Cliente *
-              </label>
+            <div className="col-span-2">
+              <label className="label-sm">Cliente *</label>
               <SearchSelect
                 options={opClientes}
                 value={clienteId}
                 onChange={setClienteId}
-                placeholder="Buscar cliente..."
+                placeholder="Buscar..."
                 loading={loading}
+                size="sm"
               />
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Vendedor *
-              </label>
+            <div className="col-span-2">
+              <label className="label-sm">Vendedor *</label>
               <SearchSelect
                 options={opVendedores}
                 value={vendedorId}
                 onChange={setVendedorId}
-                placeholder="Buscar vendedor..."
+                placeholder="Buscar..."
                 loading={loading}
+                size="sm"
               />
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Tipo de facturación
-              </label>
-              <select {...register("tipoFacturacion")} className="input">
-                <option value="facturado">Facturado </option>
-                <option value="comprobante">Comprobante </option>
+            <div className="col-span-2">
+              <label className="label-sm">Tipo de facturación</label>
+              <select {...register("tipoFacturacion")} className="input-sm">
+                <option value="facturado">Facturado (con IVA)</option>
+                <option value="comprobante">Comprobante (sin IVA)</option>
               </select>
             </div>
-            <div
-              className={tipoFacturacion !== "facturado" ? "col-span-2" : ""}
-            >
-              <label className="block text-xs text-gray-500 mb-1">Notas</label>
+            <div className="col-span-4">
+              <label className="label-sm">Notas</label>
               <input
                 {...register("notas")}
-                className="input"
+                className="input-sm"
                 placeholder="Observaciones..."
               />
             </div>
@@ -297,18 +274,16 @@ export default function NuevoPedidoPage() {
         </div>
 
         {/* Items */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-medium text-gray-700">Productos</h3>
+        <div className="card-compact">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-medium text-gray-700 uppercase tracking-wide">
+              Productos{" "}
               {representacionId && opcionesProductos.length > 0 && (
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {listaPrecios.length > 0
-                    ? "Usando lista de precios"
-                    : "Usando catálogo de productos"}
-                </p>
+                <span className="text-gray-400 font-normal">
+                  · {listaPrecios.length > 0 ? "lista de precios" : "catálogo"}
+                </span>
               )}
-            </div>
+            </h3>
             <button
               type="button"
               onClick={() =>
@@ -321,141 +296,76 @@ export default function NuevoPedidoPage() {
               }
               className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
             >
-              <Plus size={13} /> Agregar ítem
+              <Plus size={12} /> Agregar
             </button>
           </div>
-          <div className="space-y-3">
-            {/* Header */}
-            <div className="grid grid-cols-12 gap-2 text-xs text-gray-400 px-1">
-              <span className="col-span-4">Producto</span>
-              <span className="col-span-2">Precio unit.</span>
-              <span className="col-span-2">Cantidad</span>
-              <span className="col-span-1">Desc %</span>
-              <span className="col-span-2 text-right">Subtotal</span>
-              <span className="col-span-1" />
+
+          <div className="grid grid-cols-12 gap-3">
+            {/* Columna izquierda: lista de productos */}
+            <div className="col-span-8">
+              <div className="grid grid-cols-12 gap-1.5 text-[10px] text-gray-400 px-0.5 mb-1 uppercase">
+                <span className="col-span-5">Producto</span>
+                <span className="col-span-2">Cant.</span>
+                <span className="col-span-2">P. unit (c/IVA)</span>
+                <span className="col-span-2">Desc%</span>
+                <span className="col-span-1" />
+              </div>
+              <div className="max-h-96 overflow-y-auto pr-1">
+                {fields.map((field, index) => (
+                  <FilaItemProducto
+                    key={field.id}
+                    item={items[index]}
+                    index={index}
+                    opciones={opProductos}
+                    onSeleccionarProducto={autocompletarItem}
+                    register={register}
+                    disabled={!representacionId}
+                    onRemove={() => remove(index)}
+                    mostrarRemove={fields.length > 1}
+                  />
+                ))}
+              </div>
             </div>
 
-            {fields.map((field, index) => {
-              const precio = Number(items[index]?.precioUnitario) || 0;
-              const cant = Number(items[index]?.cantidad) || 0;
-              const desc = Math.min(Number(items[index]?.descuento) || 0, 100);
-              const subtotal = precio * cant;
-              const subtotalConDesc = subtotal * (1 - desc / 100);
-              const descuentoMonto = subtotal - subtotalConDesc;
-
-              return (
-                <div
-                  key={field.id}
-                  className="grid grid-cols-12 gap-2 items-center"
-                >
-                  <div className="col-span-4">
-                    {opProductos.length > 0 ? (
-                      <SearchSelect
-                        options={opProductos}
-                        value={items[index]?.productoSeleccionadoId || ""}
-                        onChange={(id) => autocompletarItem(index, id)}
-                        placeholder="Buscar producto..."
-                        disabled={!representacionId}
-                        valueLabel={
-                          items[index]?.productoLabel ||
-                          items[index]?.descripcion ||
-                          ""
-                        }
-                      />
-                    ) : (
-                      <input
-                        {...register(`items.${index}.descripcion`, {
-                          required: true,
-                        })}
-                        placeholder="Descripción"
-                        className="input"
-                      />
-                    )}
-                  </div>
-                  <div className="col-span-2">
+            {/* Columna derecha: totales fijos */}
+            <div className="col-span-4">
+              <div className="sticky top-0">
+                <div className="flex items-center justify-between gap-1.5 text-xs text-gray-500 mb-2">
+                  <span>Desc. global</span>
+                  <div className="flex items-center gap-1">
                     <input
                       type="number"
-                      {...register(`items.${index}.precioUnitario`)}
-                      placeholder="0.00"
-                      className="input [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <input
-                      type="number"
-                      {...register(`items.${index}.cantidad`)}
-                      placeholder="0"
-                      className="input [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    />
-                  </div>
-                  <div className="col-span-1">
-                    <input
-                      type="number"
+                      min="0"
                       max="100"
-                      {...register(`items.${index}.descuento`)}
-                      placeholder="0"
-                      className="input [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      {...register("descuentoGlobal", { valueAsNumber: true })}
+                      className="w-12 border border-gray-200 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
-                  </div>
-                  <div className="col-span-2 text-right">
-                    <p className="text-sm font-medium text-gray-700">
-                      {formatMoney(subtotalConDesc)}
-                    </p>
-                    {descuentoMonto > 0 && (
-                      <p className="text-xs text-red-400">
-                        - {formatMoney(descuentoMonto)}
-                      </p>
-                    )}
-                  </div>
-                  <div className="col-span-1 flex justify-center">
-                    {fields.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => remove(index)}
-                        className="text-red-400 hover:text-red-600"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
+                    <span>%</span>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-          {/* Totales */}
-          <div className="flex justify-end pt-4 border-t border-gray-100 mt-4">
-            <div className="w-80">
-              {/* Descuento global arriba del resumen */}
-              <div className="flex items-center justify-between text-sm text-gray-500 mb-3">
-                <div className="flex items-center gap-2">
-                  <span>Descuento global</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    {...register("descuentoGlobal", { valueAsNumber: true })}
-                    className="w-14 border border-gray-200 rounded px-1.5 py-0.5 text-xs text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                  <span>%</span>
-                </div>
+                <ResumenImpositivo
+                  items={items}
+                  descuentoGlobal={descuentoGlobal}
+                  compact
+                />
               </div>
-              <ResumenImpositivo
-                items={items}
-                descuentoGlobal={descuentoGlobal}
-              />
             </div>
           </div>
         </div>
 
-        <div className="flex justify-end gap-3">
+        <div className="flex justify-end gap-2">
           <button
             type="button"
             onClick={() => navigate("/pedidos")}
-            className="btn-secondary"
+            className="btn-secondary text-sm"
           >
             Cancelar
           </button>
-          <button type="submit" disabled={isPending} className="btn-primary">
+          <button
+            type="submit"
+            disabled={isPending}
+            className="btn-primary text-sm"
+          >
             {isPending ? "Guardando..." : "Crear pedido"}
           </button>
         </div>

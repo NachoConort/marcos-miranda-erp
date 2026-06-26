@@ -23,6 +23,15 @@
   .badge {
     @apply px-2 py-0.5 rounded-full text-xs font-medium;
   }
+   .input-sm {
+    @apply w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent;
+  }
+  .label-sm {
+    @apply block text-xs text-gray-500 mb-0.5;
+  }
+  .card-compact {
+    @apply bg-white rounded-lg border border-gray-200 p-3.5;
+  }
 }
 
 
