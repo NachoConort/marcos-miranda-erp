@@ -369,7 +369,7 @@ export default function NuevaVentaPage() {
             <button
               type="button"
               onClick={() =>
-                appendItem({
+                append({
                   descripcion: "",
                   cantidad: "",
                   precioUnitario: "",
@@ -382,9 +382,9 @@ export default function NuevaVentaPage() {
             </button>
           </div>
 
-          <div className="grid grid-cols-12 gap-3">
-            {/* Columna izquierda: lista de productos con scroll si crece mucho */}
-            <div className="col-span-8">
+          <div className="flex gap-4 items-start">
+            {/* Columna izquierda: productos — crece con el contenido */}
+            <div className="flex-1 min-w-0">
               <div className="grid grid-cols-12 gap-1.5 text-[10px] text-gray-400 px-0.5 mb-1 uppercase">
                 <span className="col-span-5">Producto</span>
                 <span className="col-span-2">Cant.</span>
@@ -392,26 +392,24 @@ export default function NuevaVentaPage() {
                 <span className="col-span-2">Desc%</span>
                 <span className="col-span-1" />
               </div>
-              <div className="max-h-96 overflow-y-auto pr-1">
-                {itemFields.map((field, index) => (
-                  <FilaItemProducto
-                    key={field.id}
-                    item={items[index]}
-                    index={index}
-                    opciones={opProductos}
-                    onSeleccionarProducto={autocompletarItem}
-                    register={register}
-                    disabled={!representacionId}
-                    onRemove={() => removeItem(index)}
-                    mostrarRemove={itemFields.length > 1}
-                  />
-                ))}
-              </div>
+              {fields.map((field, index) => (
+                <FilaItemProducto
+                  key={field.id}
+                  item={items[index]}
+                  index={index}
+                  opciones={opProductos}
+                  onSeleccionarProducto={autocompletarItem}
+                  register={register}
+                  disabled={!representacionId}
+                  onRemove={() => remove(index)}
+                  mostrarRemove={fields.length > 1}
+                />
+              ))}
             </div>
 
-            {/* Columna derecha: totales SIEMPRE fijos, no se mueven con la lista */}
-            <div className="col-span-4">
-              <div className="sticky top-0">
+            {/* Columna derecha: totales — ancho fijo, sticky respecto al scroll de la página */}
+            <div className="w-64 flex-shrink-0">
+              <div className="sticky top-4">
                 <div className="flex items-center justify-between gap-1.5 text-xs text-gray-500 mb-2">
                   <span>Desc. global</span>
                   <div className="flex items-center gap-1">

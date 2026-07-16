@@ -110,27 +110,42 @@ export default function NuevoPresupuestoPage() {
     });
   }, [representacionId]);
 
+  const tipoComprobante = watch("tipoComprobante");
+
+  useEffect(() => {
+    const tipo = tipoComprobante === "factura" ? "con_factura" : "en_negro";
+    setValue("comisionRepresentacion.tipo", tipo);
+    setValue("comisionVendedor.tipo", tipo);
+  }, [tipoComprobante]);
+
   const autocompletarItem = (index, productoId) => {
     setValue(`items.${index}.productoSeleccionadoId`, productoId);
     setValue(`items.${index}.productoId`, productoId);
 
+    // Primero buscar en lista de precios
     const itemLista = listaPrecios.find((i) => i._id === productoId);
     if (itemLista) {
       setValue(`items.${index}.descripcion`, itemLista.descripcion);
-      setValue(`items.${index}.precioUnitario`, itemLista.precio);
+      setValue(`items.${index}.precioUnitario`, Number(itemLista.precio) || 0);
       setValue(`items.${index}.codigo`, itemLista.codigo || "");
       setValue(`items.${index}.unidad`, itemLista.unidad || "");
       setValue(`items.${index}.productoLabel`, itemLista.descripcion);
+      // Buscar el IVA en el catálogo por código
       const prod = productos.find(
-        (p) => p._id === productoId || p.codigo === itemLista.codigo,
+        (p) => p.codigo === itemLista.codigo || p._id === productoId,
       );
       setValue(`items.${index}.porcentajeIva`, prod?.porcentajeIva ?? 21);
       return;
     }
+
+    // Si no hay lista de precios, buscar en catálogo
     const producto = productos.find((p) => p._id === productoId);
     if (producto) {
       setValue(`items.${index}.descripcion`, producto.nombre);
-      setValue(`items.${index}.precioUnitario`, producto.precioFinal);
+      setValue(
+        `items.${index}.precioUnitario`,
+        Number(producto.precioFinal) || Number(producto.costo) || 0,
+      );
       setValue(`items.${index}.codigo`, producto.codigo || "");
       setValue(`items.${index}.unidad`, producto.unidadMedida || "");
       setValue(`items.${index}.productoLabel`, producto.nombre);
@@ -150,13 +165,28 @@ export default function NuevoPresupuestoPage() {
     if (!clienteId) return alert("Seleccioná un cliente");
     if (!vendedorId) return alert("Seleccioná un vendedor");
 
+    // Validar comisiones
+    const pctRep = Number(data.comisionRepresentacion?.porcentaje) || 0;
+    const pctVend = Number(data.comisionVendedor?.porcentaje) || 0;
+
+    if (pctRep > 100)
+      return alert("La comisión de la representación no puede superar el 100%");
+    if (pctVend > 100)
+      return alert("La comisión del vendedor no puede superar el 100%");
+    if (pctRep < pctVend)
+      return alert(
+        `La comisión de la representación (${pctRep}%) no puede ser menor que la del vendedor (${pctVend}%)`,
+      );
+
     const itemsCalculados = data.items.map((item) => ({
       ...item,
+      descuento: Math.min(Number(item.descuento) || 0, 100),
       subtotal:
         Number(item.precioUnitario) *
         Number(item.cantidad) *
         (1 - Math.min(Number(item.descuento) || 0, 100) / 100),
     }));
+
     crear({
       ...data,
       representacion: representacionId,
@@ -314,9 +344,9 @@ export default function NuevoPresupuestoPage() {
             </button>
           </div>
 
-          <div className="grid grid-cols-12 gap-3">
-            {/* Columna izquierda: lista de productos */}
-            <div className="col-span-8">
+          <div className="flex gap-4 items-start">
+            {/* Columna izquierda: productos — crece con el contenido */}
+            <div className="flex-1 min-w-0">
               <div className="grid grid-cols-12 gap-1.5 text-[10px] text-gray-400 px-0.5 mb-1 uppercase">
                 <span className="col-span-5">Producto</span>
                 <span className="col-span-2">Cant.</span>
@@ -324,26 +354,24 @@ export default function NuevoPresupuestoPage() {
                 <span className="col-span-2">Desc%</span>
                 <span className="col-span-1" />
               </div>
-              <div className="max-h-96 overflow-y-auto pr-1">
-                {fields.map((field, index) => (
-                  <FilaItemProducto
-                    key={field.id}
-                    item={items[index]}
-                    index={index}
-                    opciones={opProductos}
-                    onSeleccionarProducto={autocompletarItem}
-                    register={register}
-                    disabled={!representacionId}
-                    onRemove={() => remove(index)}
-                    mostrarRemove={fields.length > 1}
-                  />
-                ))}
-              </div>
+              {fields.map((field, index) => (
+                <FilaItemProducto
+                  key={field.id}
+                  item={items[index]}
+                  index={index}
+                  opciones={opProductos}
+                  onSeleccionarProducto={autocompletarItem}
+                  register={register}
+                  disabled={!representacionId}
+                  onRemove={() => remove(index)}
+                  mostrarRemove={fields.length > 1}
+                />
+              ))}
             </div>
 
-            {/* Columna derecha: totales fijos */}
-            <div className="col-span-4">
-              <div className="sticky top-0">
+            {/* Columna derecha: totales — ancho fijo, sticky respecto al scroll de la página */}
+            <div className="w-64 flex-shrink-0">
+              <div className="sticky top-4">
                 <div className="flex items-center justify-between gap-1.5 text-xs text-gray-500 mb-2">
                   <span>Desc. global</span>
                   <div className="flex items-center gap-1">
@@ -371,35 +399,29 @@ export default function NuevoPresupuestoPage() {
         <div className="card-compact">
           <h3 className="text-xs font-medium text-gray-700 mb-2.5 uppercase tracking-wide">
             Comisiones
+            <span className="ml-2 text-gray-400 font-normal normal-case">
+              ({tipoComprobante === "factura" ? "con factura" : "en negro"})
+            </span>
           </h3>
           <div className="grid grid-cols-2 gap-4">
             {esAdmin && (
               <div className="bg-gray-50 rounded-md p-3">
                 <p className="text-xs font-medium text-gray-600 mb-2">
-                  Comisión representación{" "}
+                  Comisión representación
                   <span className="ml-1 badge bg-purple-100 text-purple-700 text-[10px]">
                     admin
                   </span>
                 </p>
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="100"
-                    {...register("comisionRepresentacion.porcentaje")}
-                    className="input-sm"
-                    placeholder="%"
-                  />
-                  <select
-                    {...register("comisionRepresentacion.tipo")}
-                    className="input-sm"
-                  >
-                    <option value="con_factura">Con factura</option>
-                    <option value="en_negro">En negro</option>
-                  </select>
-                </div>
-                <div className="flex justify-between text-xs border-t border-gray-200 pt-1.5">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="100"
+                  {...register("comisionRepresentacion.porcentaje")}
+                  className="input-sm w-full"
+                  placeholder="%"
+                />
+                <div className="flex justify-between text-xs border-t border-gray-200 pt-1.5 mt-2">
                   <span className="text-gray-500">Monto</span>
                   <span className="font-semibold text-gray-800">
                     {formatMoney(montoComRep)}
@@ -411,32 +433,23 @@ export default function NuevoPresupuestoPage() {
               className={`bg-gray-50 rounded-md p-3 ${!esAdmin ? "col-span-2" : ""}`}
             >
               <p className="text-xs font-medium text-gray-600 mb-2">
-                Comisión vendedor{" "}
+                Comisión vendedor
                 {!esAdmin && (
                   <span className="ml-1 badge bg-blue-100 text-blue-700 text-[10px]">
                     tu comisión
                   </span>
                 )}
               </p>
-              <div className="grid grid-cols-2 gap-2 mb-2">
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  max="100"
-                  {...register("comisionVendedor.porcentaje")}
-                  className="input-sm"
-                  placeholder="%"
-                />
-                <select
-                  {...register("comisionVendedor.tipo")}
-                  className="input-sm"
-                >
-                  <option value="con_factura">Con factura</option>
-                  <option value="en_negro">En negro</option>
-                </select>
-              </div>
-              <div className="flex justify-between text-xs border-t border-gray-200 pt-1.5">
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="100"
+                {...register("comisionVendedor.porcentaje")}
+                className="input-sm w-full"
+                placeholder="%"
+              />
+              <div className="flex justify-between text-xs border-t border-gray-200 pt-1.5 mt-2">
                 <span className="text-gray-500">Monto</span>
                 <span className="font-semibold text-gray-800">
                   {formatMoney(montoComVend)}
